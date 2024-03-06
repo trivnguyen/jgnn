@@ -73,8 +73,9 @@ def train(
             monitor=config.monitor, patience=config.patience, mode=config.mode,
             verbose=True),
         pl.callbacks.ModelCheckpoint(
-            monitor=config.monitor, save_top_k=config.save_top_k,
-            mode=config.mode, save_weights_only=False),
+            filename="{epoch}-{val_loss:.4f}", monitor=config.monitor,
+            save_top_k=config.save_top_k, mode=config.mode,
+            save_weights_only=False),
         pl.callbacks.LearningRateMonitor("step"),
     ]
     train_logger = pl_loggers.TensorBoardLogger(workdir, version='')
