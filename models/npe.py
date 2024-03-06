@@ -9,7 +9,7 @@ from ml_collections import ConfigDict
 
 from . import models, models_utils, flows_utils, transforms_utils
 
-class Regressors(pl.LightningModule):
+class NPE(pl.LightningModule):
     def __init__(
         self,
         input_size: int,

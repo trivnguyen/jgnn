@@ -14,7 +14,7 @@ from absl import flags, logging
 from ml_collections import config_flags
 
 import datasets
-from models import models, regressor, utils
+from models import models, npe, utils
 
 logging.set_verbosity(logging.INFO)
 
@@ -55,7 +55,7 @@ def train(
     )
 
     # create model
-    model = regressors.Regressors(
+    model = npe.NPE(
         input_size=config.model.input_size,
         output_size=config.model.output_size,
         featurizer_args=config.model.featurizer,
