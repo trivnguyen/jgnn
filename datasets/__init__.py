@@ -176,9 +176,9 @@ def prepare_dataloaders(
     # create data loaders
     train_loader = DataLoader(
         train_graphs, batch_size=train_batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=torch.cuda.is_available())
+        num_workers=num_workers, pin_memory=False)
     val_loader = DataLoader(
         val_graphs, batch_size=eval_batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=torch.cuda.is_available())
+        num_workers=num_workers, pin_memory=False)
 
     return train_loader, val_loader, norm_dict
