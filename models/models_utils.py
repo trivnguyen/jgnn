@@ -17,7 +17,6 @@ class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
         return self.eta_min + (
             0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - warmup_steps))))
 
-
 def get_activation(activation):
     """ Get an activation function. """
     if activation.name.lower() == 'identity':
@@ -29,7 +28,8 @@ def get_activation(activation):
     elif activation.name.lower() == 'sigmoid':
         return nn.Sigmoid()
     elif activation.name.lower() == 'leaky_relu':
-        return nn.LeakyReLU(activation.leaky_relu_alpha)
+        alpha = activation.get('leaky_relu_alpha', 0.01)
+        return nn.LeakyReLU(alpha)
     elif activation.name.lower() == 'gelu':
         return nn.GELU()
     else:

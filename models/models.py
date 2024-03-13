@@ -47,6 +47,7 @@ class GNNBlock(nn.Module):
         elif self.layer_name == "GATConv":
             self.has_edge_attr = True
             self.has_edge_weight = False
+            self.layer_params['concat'] = False  # only works when False
             self.graph_layer =  gnn.GATConv(
                 self.input_size, self.output_size, **self.layer_params)
         else:
@@ -62,12 +63,14 @@ class GNNBlock(nn.Module):
             x = self.graph_layer(x, edge_index, edge_weight)
         else:
             x = self.graph_layer(x, edge_index)
-        if self.norm_first:
+        if self.norm_first and self.norm is not None:
             x = self.norm(x)
             x = self.activation_fn(x)
+        elif self.norm is not None:
+            x = self.activation_fn(x)
+            x = self.norm(x)
         else:
             x = self.activation_fn(x)
-            x = self.norm(x)
         return x
 
 
@@ -82,7 +85,7 @@ class GNN(nn.Module):
         Activation function
     """
     def __init__(
-        self, input_size: int, hidden_sizes: List[int],
+        self, input_size: int, hidden_sizes: List[int], projection_size: int = None,
         graph_layer: str = "ChebConv", graph_layer_params: Dict[str, Any] = None,
         activation_fn: callable = nn.ReLU(), pooling: str = "mean",
         layer_norm: bool = False, norm_first: bool = False
@@ -90,6 +93,7 @@ class GNN(nn.Module):
         super().__init__()
         self.input_size = input_size
         self.hidden_sizes = hidden_sizes
+        self.projection_size = projection_size
         self.graph_layer = graph_layer
         self.graph_layer_params = graph_layer_params or {}
         self.activation_fn = activation_fn
@@ -101,8 +105,16 @@ class GNN(nn.Module):
         self.has_edge_weight = None
 
         # setup the model
+        if self.projection_size:
+            self.projection_layer = nn.Linear(
+                self.input_size, self.projection_size)
+            input_size = self.projection_size
+        else:
+            self.projection_layer = None
+            input_size = self.input_size
+
         self.layers = nn.ModuleList()
-        layer_sizes = [self.input_size] + self.hidden_sizes
+        layer_sizes = [input_size] + self.hidden_sizes
         for i in range(1, len(layer_sizes)):
             layer = GNNBlock(
                 layer_sizes[i-1], layer_sizes[i], self.graph_layer,
@@ -116,6 +128,9 @@ class GNN(nn.Module):
         batch: torch.Tensor, edge_attr: torch.Tensor = None,
         edge_weight: torch.Tensor = None
     ) -> torch.Tensor:
+        if self.projection_layer:
+            x = self.projection_layer(x)
+
         for layer in self.layers:
             x = layer(x, edge_index, edge_attr, edge_weight)
 

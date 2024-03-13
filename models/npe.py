@@ -46,6 +46,7 @@ class NPE(pl.LightningModule):
             self.featurizer = models.GNN(
                 input_size=self.input_size,
                 hidden_sizes=self.featurizer_args.hidden_sizes,
+                projection_size=self.featurizer_args.projection_size,
                 graph_layer=self.featurizer_args.graph_layer,
                 graph_layer_params=self.featurizer_args.graph_layer_params,
                 activation_fn=activation_fn,
@@ -103,17 +104,23 @@ class NPE(pl.LightningModule):
         }
         return batch_dict
 
+    def forward(self, x, edge_index, batch, edge_attr, edge_weight):
+        flow_context = self.featurizer(
+            x, edge_index, batch=batch, edge_attr=edge_attr, edge_weight=edge_weight)
+        flow_context = self.mlp(flow_context)
+        return flow_context
+
+
     def training_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
 
         # forward pass
-        flow_context = self.featurizer(
+        flow_context = self.forward(
             batch_dict['x'], batch_dict['edge_index'],
             batch=batch_dict['batch'],
             edge_attr=batch_dict['edge_attr'],
             edge_weight=batch_dict['edge_weight']
         )
-        flow_context = self.mlp(flow_context)
         log_prob = self.flows.log_prob(
             batch_dict['theta'], context=flow_context)
         loss = -log_prob.mean()
@@ -128,14 +135,12 @@ class NPE(pl.LightningModule):
         batch_dict = self._prepare_batch(batch)
 
         # forward pass
-        flow_context = self.featurizer(
+        flow_context = self.forward(
             batch_dict['x'], batch_dict['edge_index'],
             batch=batch_dict['batch'],
             edge_attr=batch_dict['edge_attr'],
             edge_weight=batch_dict['edge_weight']
         )
-        flow_context = self.mlp(flow_context)
-
         log_prob = self.flows.log_prob(
             batch_dict['theta'], context=flow_context)
         loss = -log_prob.mean()
@@ -144,8 +149,6 @@ class NPE(pl.LightningModule):
         self.log(
             'val_loss', loss, on_step=True, on_epoch=True,
             prog_bar=True, batch_size=batch_dict['batch_size'])
-        return loss
-
         return loss
 
     def configure_optimizers(self):
