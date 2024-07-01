@@ -14,6 +14,7 @@ from absl import flags, logging
 from ml_collections import config_flags
 
 import datasets
+from models.zuko import npe as zuko_npe
 from models import models, npe, utils
 
 logging.set_verbosity(logging.INFO)
@@ -55,17 +56,30 @@ def train(
     )
 
     # create model
-    model = npe.NPE(
-        input_size=config.model.input_size,
-        output_size=config.model.output_size,
-        featurizer_args=config.model.featurizer,
-        mlp_args=config.model.mlp,
-        flows_args=config.model.flows,
-        pre_transform_args=config.model.pre_transform,
-        optimizer_args=config.optimizer,
-        scheduler_args=config.scheduler,
-        norm_dict=norm_dict,
-    )
+    if config.model.zuko:
+        model = zuko_npe.NPE(
+            input_size=config.model.input_size,
+            output_size=config.model.output_size,
+            featurizer_args=config.model.featurizer,
+            mlp_args=config.model.mlp,
+            flows_args=config.model.flows,
+            pre_transform_args=config.model.pre_transform,
+            optimizer_args=config.optimizer,
+            scheduler_args=config.scheduler,
+            norm_dict=norm_dict,
+        )
+    else:
+        model = npe.NPE(
+            input_size=config.model.input_size,
+            output_size=config.model.output_size,
+            featurizer_args=config.model.featurizer,
+            mlp_args=config.model.mlp,
+            flows_args=config.model.flows,
+            pre_transform_args=config.model.pre_transform,
+            optimizer_args=config.optimizer,
+            scheduler_args=config.scheduler,
+            norm_dict=norm_dict,
+        )
 
     # create the trainer object
     callbacks = [

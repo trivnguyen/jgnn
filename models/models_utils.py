@@ -35,6 +35,21 @@ def get_activation(activation):
     else:
         raise ValueError(f'Unknown activation function: {activation.name}')
 
+def get_activation_zuko(activation):
+    """ Get an activation function. """
+    if activation.name.lower() == 'identity':
+        return nn.Identity
+    elif activation.name.lower() == 'relu':
+        return nn.ReLU
+    elif activation.name.lower() == 'tanh':
+        return nn.Tanh
+    elif activation.name.lower() == 'sigmoid':
+        return nn.Sigmoid
+    elif activation.name.lower() == 'gelu':
+        return nn.GELU
+    else:
+        raise ValueError(f'Unknown activation function: {activation.name}')
+
 def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
     """ Return optimizer and scheduler for Pytorch Lightning """
     scheduler_args = scheduler_args or {}
