@@ -4,6 +4,7 @@ import pickle
 import sys
 import shutil
 
+import yaml
 import ml_collections
 import numpy as np
 import pytorch_lightning as pl
@@ -44,6 +45,12 @@ def train(
             raise ValueError(
                 f"Workdir {workdir} already exists. Please set overwrite=True "
                 "to overwrite the existing directory.")
+
+    # copy yaml file
+    os.makedirs(workdir, exist_ok=True)
+    config_dict = ml_collections.ConfigDict.to_dict(config)
+    with open(os.path.join(workdir, 'config.yaml'), 'w') as f:
+        yaml.dump(config_dict, f)
 
     # read in the dataset and prepare the data loader for training
     node_feats, graph_feats = datasets.read_datasets(
@@ -87,7 +94,7 @@ def train(
             monitor=config.monitor, patience=config.patience, mode=config.mode,
             verbose=True),
         pl.callbacks.ModelCheckpoint(
-            filename="{epoch}-{val_loss:.4f}", monitor=config.monitor,
+            filename="{epoch}-{step}-{val_loss:.4f}", monitor=config.monitor,
             save_top_k=config.save_top_k, mode=config.mode,
             save_weights_only=False),
         pl.callbacks.LearningRateMonitor("step"),
@@ -105,7 +112,9 @@ def train(
     # train the model
     logging.info("Training model...")
     trainer.fit(
-        model, train_loader, val_loader,
+        model,
+        train_loader,
+        val_loader,
         ckpt_path=checkpoint_path
     )
 
