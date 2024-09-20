@@ -15,7 +15,7 @@ class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
         if step < self.warmup_steps:
             return float(step) / float(max(1, self.warmup_steps))
         return self.eta_min + (
-            0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - warmup_steps))))
+            0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - self.warmup_steps))))
 
 def get_activation(activation):
     """ Get an activation function. """
@@ -56,11 +56,11 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
 
     # setup the optimizer
     if optimizer_args.name == "Adam":
-        return torch.optim.Adam(
+        optimizer = torch.optim.Adam(
             parameters, lr=optimizer_args.lr,
             weight_decay=optimizer_args.weight_decay)
     elif optimizer_args.name == "AdamW":
-        return torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             parameters, lr=optimizer_args.lr,
             weight_decay=optimizer_args.weight_decay)
     else:
@@ -79,7 +79,7 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
             optimizer, T_max=scheduler_args.T_max,
             eta_min=scheduler_args.eta_min)
     elif scheduler_args.name == 'WarmUpCosineAnnealingLR':
-        scheduler = models_utils.WarmUpCosineAnnealingLR(
+        scheduler = WarmUpCosineAnnealingLR(
             optimizer,
             decay_steps=scheduler_args.decay_steps,
             warmup_steps=scheduler_args.warmup_steps,
