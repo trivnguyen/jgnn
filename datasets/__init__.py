@@ -1,6 +1,7 @@
 
 import os
 import h5py
+from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -83,12 +84,12 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
     return node_features, graph_features, headers
 
 def read_datasets(
-    root, name, num_datasets=100, is_directory=True, concat=True):
+    root, name, num_datasets=100, init=0, is_directory=True, concat=True):
 
     if is_directory:
         node_feats, graph_feats = {}, {}
 
-        for i in range(num_datasets):
+        for i in tqdm(range(init, init + num_datasets)):
             data_path = os.path.join(root, name, "data.{}.hdf5".format(i))
             if not os.path.exists(data_path):
                 break
@@ -97,10 +98,10 @@ def read_datasets(
 
             # append to the dataset
             for k in nodes:
-                node_feats[k] = [] if i == 0 else node_feats[k]
+                node_feats[k] = [] if i == init else node_feats[k]
                 node_feats[k].append(nodes[k])
             for k in graphs:
-                graph_feats[k] = [] if i == 0 else graph_feats[k]
+                graph_feats[k] = [] if i == init else graph_feats[k]
                 graph_feats[k].append(graphs[k])
         # concatenate the datasets
         for k in node_feats:
