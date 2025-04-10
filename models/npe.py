@@ -7,7 +7,8 @@ import pytorch_lightning as pl
 import torch_geometric.transforms as T
 from ml_collections import ConfigDict
 
-from . import models, models_utils, flows_utils, transforms_utils
+from models.zuko import flows_utils
+from models import transforms_utils, models_utils, models
 
 class NPE(pl.LightningModule):
     def __init__(
@@ -41,8 +42,7 @@ class NPE(pl.LightningModule):
 
         # create the feauturizer
         if self.featurizer_args.name == 'gnn':
-            activation_fn = models_utils.get_activation(
-                self.featurizer_args.activation)
+            activation_fn = models_utils.get_activation(self.featurizer_args.activation)
             self.featurizer = models.GNN(
                 input_size=self.input_size,
                 hidden_sizes=self.featurizer_args.hidden_sizes,
@@ -59,26 +59,26 @@ class NPE(pl.LightningModule):
                 f'Featurizer {featurizer_name} not supported')
 
         # create the mlp layers
-        activation_fn = models_utils.get_activation(
-            self.mlp_args.activation)
-        self.mlp = models.MLP(
+        activation_fn = models_utils.get_activation(self.mlp_args.activation)
+        self.mlp = models.MLPBatchNorm(
             input_size=self.featurizer_args.hidden_sizes[-1],
             hidden_sizes=self.mlp_args.hidden_sizes,
             output_size=self.mlp_args.output_size,
             activation_fn=activation_fn,
+            batch_norm=self.mlp_args.batch_norm,
+            dropout=self.mlp_args.dropout,
         )
 
         # create the flows
-        activation_fn = models_utils.get_activation(
-            self.flows_args.activation)
-        self.flows = flows_utils.build_maf(
+        activation_fn = models_utils.get_activation_zuko(self.flows_args.activation)
+        self.flows = flows_utils.build_flows(
             context_features=self.mlp_args.output_size,
-            hidden_features=self.flows_args.hidden_size,
             features=self.output_size,
-            num_layers=self.flows_args.num_layers,
-            num_blocks=self.flows_args.num_blocks,
-            activation_fn=activation_fn,
-            batch_norm=self.flows_args.batch_norm,
+            hidden_features=self.flows_args.hidden_sizes,
+            num_transforms=self.flows_args.num_transforms,
+            num_bins=self.flows_args.num_bins,
+            activation=activation_fn,
+            randperm=True
         )
 
         # create pre-transforms
@@ -110,7 +110,6 @@ class NPE(pl.LightningModule):
         flow_context = self.mlp(flow_context)
         return flow_context
 
-
     def training_step(self, batch, batch_idx):
         batch_dict = self._prepare_batch(batch)
 
@@ -121,8 +120,7 @@ class NPE(pl.LightningModule):
             edge_attr=batch_dict['edge_attr'],
             edge_weight=batch_dict['edge_weight']
         )
-        log_prob = self.flows.log_prob(
-            batch_dict['theta'], context=flow_context)
+        log_prob = self.flows(flow_context).log_prob(batch_dict['theta'])
         loss = -log_prob.mean()
 
         # log the loss
@@ -141,8 +139,7 @@ class NPE(pl.LightningModule):
             edge_attr=batch_dict['edge_attr'],
             edge_weight=batch_dict['edge_weight']
         )
-        log_prob = self.flows.log_prob(
-            batch_dict['theta'], context=flow_context)
+        log_prob = self.flows(flow_context).log_prob(batch_dict['theta'])
         loss = -log_prob.mean()
 
         # log the loss

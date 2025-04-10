@@ -4,16 +4,21 @@ import torch.nn as nn
 import math
 
 class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
-    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1):
+    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1, step_after_max=True):
         self.decay_steps = decay_steps
         self.warmup_steps = warmup_steps
         self.eta_min = eta_min
+        self.step_after_max = step_after_max
         super().__init__(
             optimizer, self.lr_lambda, last_epoch=last_epoch)
 
     def lr_lambda(self, step):
         if step < self.warmup_steps:
             return float(step) / float(max(1, self.warmup_steps))
+
+        if step > self.decay_steps and self.step_after_max:
+            step = self.decay_steps
+
         return self.eta_min + (
             0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - self.warmup_steps))))
 
