@@ -7,8 +7,8 @@ import pytorch_lightning as pl
 import torch_geometric.transforms as T
 from ml_collections import ConfigDict
 
-from models.zuko import flows_utils
-from models import transforms_utils, models_utils, models
+from jgnn import flows_utils
+from jgnn import flows_utils, transforms_utils, models_utils, models
 
 class NPE(pl.LightningModule):
     def __init__(
@@ -33,7 +33,6 @@ class NPE(pl.LightningModule):
         self.optimizer_args = optimizer_args
         self.scheduler_args = scheduler_args
         self.norm_dict = norm_dict
-        self.pre_tranform = None
         self.save_hyperparameters()
 
         self._setup_model()

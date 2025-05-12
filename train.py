@@ -15,7 +15,7 @@ from absl import flags, logging
 from ml_collections import config_flags
 
 import datasets
-from models import models, npe, utils
+from jgnn import models, npe, utils
 
 logging.set_verbosity(logging.INFO)
 
