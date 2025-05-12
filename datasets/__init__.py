@@ -157,16 +157,16 @@ def prepare_dataloaders(
         theta_scale = theta_train.std(dim=0)
 
         norm_dict = {
-            'x_loc': x_loc,
-            'x_scale': x_scale,
-            'theta_loc': theta_loc,
-            'theta_scale': theta_scale,
+            'x_loc': list(x_loc.cpu().numpy()),
+            'x_scale': list(x_scale.cpu().numpy()),
+            'theta_loc': list(theta_loc.cpu().numpy()),
+            'theta_scale': list(theta_scale.cpu().numpy()),
         }
     else:
-        x_loc = norm_dict['x_loc']
-        x_scale = norm_dict['x_scale']
-        theta_loc = norm_dict['theta_loc']
-        theta_scale = norm_dict['theta_scale']
+        x_loc = norm_dict['x_loc'].to(train_graphs[0].x.device)
+        x_scale = norm_dict['x_scale'].to(train_graphs[0].x.device)
+        theta_loc = norm_dict['theta_loc'].to(train_graphs[0].theta.device)
+        theta_scale = norm_dict['theta_scale'].to(train_graphs[0].theta.device)
     for g in train_graphs:
         g.x = (g.x - x_loc) / x_scale
         g.theta = (g.theta - theta_loc) / theta_scale
