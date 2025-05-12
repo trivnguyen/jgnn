@@ -23,7 +23,7 @@ class GNNBlock(nn.Module):
         self.norm_first = norm_first
         self.has_edge_attr = False
         self.has_edge_weight = False
-        self.grah_layer = None
+        self.graph_layer = None
         self.norm = None
 
         self._setup_model()
