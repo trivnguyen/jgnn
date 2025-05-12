@@ -83,7 +83,7 @@ def get_config():
     # scheduler.T_max = 100_000
     # scheduler.eta_min = 1e-6
     # scheduler.interval = "step"
-cl
+
     # training loop configuration
     config.num_epochs = 1_000
     config.patience = 1_000
