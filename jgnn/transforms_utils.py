@@ -47,6 +47,8 @@ class RandomProjection:
         pass
 
     def __call__(self, data):
+        data = data.clone()
+
         # create the random projection matrix
         R = random_rotation_matrix()
 
@@ -70,6 +72,7 @@ class GetNodeFeatures:
         pass
 
     def __call__(self, data):
+        data = data.clone()
         pos = data.pos
         vel = data.vel
         rad = torch.norm(pos, dim=1).unsqueeze(1)
