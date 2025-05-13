@@ -138,7 +138,7 @@ def prepare_dataloaders(
         flow_labels = [graph_feats[k][i] for k in labels]
 
         graph = preprocess.create_graph_from_posvel(
-            pos, vel, vel_error=vel_error, label=flow_labels)
+            pos, vel, vel_error=vel_error, label=flow_labels, cond=cond)
         graphs.append(graph)
 
     # split the dataset into train and val

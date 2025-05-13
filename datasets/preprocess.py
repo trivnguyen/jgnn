@@ -38,6 +38,6 @@ def create_graph_from_posvel(
         x = torch.cat([log_rad, vel, vel_error], dim=1)
     else:
         x = torch.cat([log_rad,  vel], dim=1)
-    graph = Data(x=x, theta=label, pos=pos, cond=cond)
+    graph = Data(x=x, theta=label, pos=pos, vel=vel, cond=cond)
 
     return graph
