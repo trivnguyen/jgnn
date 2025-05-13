@@ -83,7 +83,8 @@ class NPE(pl.LightningModule):
         # create pre-transforms
         self.pre_transform = transforms_utils.build_transformation(
             graph_name=self.pre_transform_args.graph_name,
-            graph_params=self.pre_transform_args.graph_params
+            graph_params=self.pre_transform_args.graph_params,
+            random_projection=self.pre_transform_args.random_projection
         )
 
     def _prepare_batch(self, batch):
@@ -91,7 +92,6 @@ class NPE(pl.LightningModule):
         if self.pre_transform is not None:
             batch = self.pre_transform(batch)
         batch = batch.to(self.device)
-
         batch_dict = {
             'x': batch.x,
             'theta': batch.theta,
