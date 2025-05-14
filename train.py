@@ -71,9 +71,9 @@ def train(
         pre_transform_args=config.model.pre_transform,
         optimizer_args=config.optimizer,
         scheduler_args=config.scheduler,
+        conditional_mlp_args=config.model.get('conditional_mlp', None),
         norm_dict=norm_dict,
     )
-
 
     # create the trainer object
     callbacks = [

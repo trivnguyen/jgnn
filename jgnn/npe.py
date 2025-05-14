@@ -21,6 +21,7 @@ class NPE(pl.LightningModule):
         pre_transform_args: ConfigDict=None,
         optimizer_args: ConfigDict=None,
         scheduler_args: ConfigDict=None,
+        conditional_mlp_args: ConfigDict=None,
         norm_dict: Dict[str, Any]=None,
     ):
         super().__init__()
@@ -32,6 +33,7 @@ class NPE(pl.LightningModule):
         self.pre_transform_args = pre_transform_args
         self.optimizer_args = optimizer_args
         self.scheduler_args = scheduler_args
+        self.conditional_mlp_args = conditional_mlp_args
         self.norm_dict = norm_dict
         self.save_hyperparameters()
 
@@ -68,6 +70,20 @@ class NPE(pl.LightningModule):
             dropout=self.mlp_args.dropout,
         )
 
+        # create the conditional mlp layers for extra conditioning
+        if self.conditional_mlp_args is not None:
+            activation_fn = models_utils.get_activation(self.conditional_mlp_args.activation)
+            self.conditional_mlp = models.MLPBatchNorm(
+                input_size=self.conditional_mlp_args.input_size,
+                hidden_sizes=self.conditional_mlp_args.hidden_sizes,
+                output_size=self.conditional_mlp_args.output_size,
+                activation_fn=activation_fn,
+                batch_norm=self.conditional_mlp_args.batch_norm,
+                dropout=self.conditional_mlp_args.dropout,
+            )
+        else:
+            self.conditional_mlp = None
+
         # create the flows
         activation_fn = models_utils.get_activation_zuko(self.flows_args.activation)
         self.flows = flows_utils.build_flows(
@@ -99,14 +115,20 @@ class NPE(pl.LightningModule):
             'edge_attr': batch.edge_attr,
             'edge_weight': batch.edge_weight,
             'batch': batch.batch,
-            'batch_size': len(batch)
+            'batch_size': len(batch),
+            'cond': batch.cond if hasattr(batch, 'cond') else None,
         }
         return batch_dict
 
-    def forward(self, x, edge_index, batch, edge_attr, edge_weight):
+    def forward(self, x, edge_index, batch, edge_attr, edge_weight, cond=None):
         flow_context = self.featurizer(
             x, edge_index, batch=batch, edge_attr=edge_attr, edge_weight=edge_weight)
         flow_context = self.mlp(flow_context)
+
+        if self.conditional_mlp_args is not None:
+            cond = self.conditional_mlp(cond)
+            flow_context = flow_context + cond
+
         return flow_context
 
     def training_step(self, batch, batch_idx):
@@ -117,7 +139,8 @@ class NPE(pl.LightningModule):
             batch_dict['x'], batch_dict['edge_index'],
             batch=batch_dict['batch'],
             edge_attr=batch_dict['edge_attr'],
-            edge_weight=batch_dict['edge_weight']
+            edge_weight=batch_dict['edge_weight'],
+            cond=batch_dict['cond']
         )
         log_prob = self.flows(flow_context).log_prob(batch_dict['theta'])
         loss = -log_prob.mean()
@@ -136,7 +159,8 @@ class NPE(pl.LightningModule):
             batch_dict['x'], batch_dict['edge_index'],
             batch=batch_dict['batch'],
             edge_attr=batch_dict['edge_attr'],
-            edge_weight=batch_dict['edge_weight']
+            edge_weight=batch_dict['edge_weight'],
+            cond=batch_dict['cond']
         )
         log_prob = self.flows(flow_context).log_prob(batch_dict['theta'])
         loss = -log_prob.mean()
