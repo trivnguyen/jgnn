@@ -68,15 +68,22 @@ class RandomProjection:
 
 class GetNodeFeatures:
     """ Extract node features from the input data """
-    def __init__(self):
-        pass
+    def __init__(self, x_loc=0, x_scale=1):
+        # Convert inputs to tensors if they aren't already
+        if not isinstance(x_loc, torch.Tensor):
+            self.x_loc = torch.tensor(x_loc, requires_grad=False)
+            self.x_scale = torch.tensor(x_scale, requires_grad=False)
+        else:
+            self.x_loc = x_loc.detach()
+            self.x_scale = x_scale.detach()
 
     def __call__(self, data):
         data = data.clone()
-        pos = data.pos
-        vel = data.vel
-        rad = torch.norm(pos, dim=1).unsqueeze(1)
+        rad = torch.norm(data.pos, dim=1).unsqueeze(1)
+        vel = torch.norm(data.vel, dim=1).unsqueeze(1)
         log_rad = torch.log10(rad + 1e-6)
-        node_features = torch.cat([log_rad, vel], dim=1)
-        data.x = node_features
+        log_vel = torch.log10(vel + 1e-6)
+        x = torch.cat([log_rad, log_vel], dim=1)
+        x = (x - self.x_loc.to(x.device)) / self.x_scale.to(x.device)
+        data.x = x
         return data
