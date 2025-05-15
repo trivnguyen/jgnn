@@ -100,7 +100,10 @@ class NPE(pl.LightningModule):
         self.pre_transform = transforms_utils.build_transformation(
             graph_name=self.pre_transform_args.graph_name,
             graph_params=self.pre_transform_args.graph_params,
-            random_projection=self.pre_transform_args.random_projection
+            random_projection=self.pre_transform_args.random_projection,
+            selection=self.pre_transform_args.selection,
+            selection_args=self.pre_transform_args.selection_params,
+            norm_dict=self.norm_dict
         )
 
     def _prepare_batch(self, batch):
