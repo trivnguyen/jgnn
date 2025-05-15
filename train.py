@@ -59,6 +59,7 @@ def train(
         node_feats, graph_feats, config.labels, train_batch_size=config.train_batch_size,
         eval_batch_size=config.eval_batch_size, train_frac=config.train_frac,
         num_workers=config.num_workers, seed=config.seed,
+        norm_version=config.get('norm_version', 'v2'),
     )
 
     # create model
