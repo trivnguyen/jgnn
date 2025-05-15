@@ -12,8 +12,8 @@ class RadialSelectionFunction:
             raise ValueError(f"q_min should be in [0, 1], but got {q_min}")
         if not (0 <= q_max <= 1):
             raise ValueError(f"q_max should be in [0, 1], but got {q_max}")
-        if q_min >= q_max:
-            raise ValueError(f"q_min should be smaller than q_max, but got {q_min} >= {q_max}")
+        if q_min > q_max:
+            raise ValueError(f"q_min should be smaller than q_max, but got {q_min} > {q_max}")
 
     def __call__(self, batch):
         batch = batch.clone()
