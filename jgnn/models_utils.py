@@ -4,23 +4,25 @@ import torch.nn as nn
 import math
 
 class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
-    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1, step_after_max=True):
+    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1, restart=False):
         self.decay_steps = decay_steps
         self.warmup_steps = warmup_steps
         self.eta_min = eta_min
-        self.step_after_max = step_after_max
+        self.restart = restart
         super().__init__(
             optimizer, self.lr_lambda, last_epoch=last_epoch)
 
     def lr_lambda(self, step):
+        if (step >= self.decay_steps):
+            if self.restart:
+                step = step % self.decay_steps
+            else:
+                step = self.decay_steps
         if step < self.warmup_steps:
             return float(step) / float(max(1, self.warmup_steps))
-
-        if step > self.decay_steps and self.step_after_max:
-            step = self.decay_steps
-
         return self.eta_min + (
             0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - self.warmup_steps))))
+
 
 def get_activation(activation):
     """ Get an activation function. """
@@ -37,6 +39,8 @@ def get_activation(activation):
         return nn.LeakyReLU(alpha)
     elif activation.name.lower() == 'gelu':
         return nn.GELU()
+    elif activation.name.lower() == 'silu':
+        return nn.SiLU()
     else:
         raise ValueError(f'Unknown activation function: {activation.name}')
 
@@ -52,6 +56,8 @@ def get_activation_zuko(activation):
         return nn.Sigmoid
     elif activation.name.lower() == 'gelu':
         return nn.GELU
+    elif activation.name.lower() == 'silu':
+        return nn.SiLU
     else:
         raise ValueError(f'Unknown activation function: {activation.name}')
 
