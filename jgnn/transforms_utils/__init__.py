@@ -4,7 +4,7 @@ from torch_geometric import transforms as T
 
 from .basic import GetNodeFeatures
 from .projection import RandomProjection
-from .selection import RadialSelectionFunction
+from .selection_function import RadialSelectionFunction, RandomSelectionStrategy
 
 def build_transformation(
     graph_name: str, graph_params: dict, random_projection: bool = False,
@@ -23,7 +23,8 @@ def build_transformation(
 
     # apply radial selection if specified
     if selection:
-        transforms.append(RadialSelectionFunction(**selection_args))
+        # transforms.append(RadialSelectionFunction(**selection_args))
+        transforms.append(RandomSelectionStrategy(**selection_args))
 
     # if random projection or selection is applied, we need to re-compute node features
     # otherwise, we assume that node features are already computed

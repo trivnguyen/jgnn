@@ -29,6 +29,9 @@ class RadialSelectionFunction:
             node_rand = torch.rand(batch.num_nodes, device=batch.pos.device)
             graph_keep_probs = torch.repeat_interleave(keep_probs, n_per_batch)
             mask = node_rand < graph_keep_probs
+        elif self.mode == 'identity':
+            # Keep all nodes (identity transform)
+            return batch
         else:
             # Proceed with quantile-based selection
             radii = torch.norm(batch.pos, dim=1)
