@@ -29,9 +29,6 @@ def train(
         name = config["name"]
     logging.info("Starting training run {} at {}".format(name, workdir))
 
-    # set up random seed
-    pl.seed_everything(config.seed)
-
     workdir = os.path.join(workdir, name)
     checkpoint_path = None
     if os.path.exists(workdir):
@@ -58,7 +55,7 @@ def train(
     train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
         node_feats, graph_feats, config.labels, train_batch_size=config.train_batch_size,
         eval_batch_size=config.eval_batch_size, train_frac=config.train_frac,
-        num_workers=config.num_workers, seed=config.seed,
+        num_workers=config.num_workers, seed=config.seed_data,
         norm_version=config.get('norm_version', 'v2'),
     )
 
@@ -100,6 +97,7 @@ def train(
 
     # train the model
     logging.info("Training model...")
+    pl.seed_everything(config.seed_training)
     trainer.fit(
         model,
         train_loader,
