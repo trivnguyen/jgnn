@@ -5,6 +5,7 @@ from torch_geometric import transforms as T
 from .basic import GetNodeFeatures
 from .projection import RandomProjection
 from .selection_function import RadialSelectionFunction, RandomSelectionStrategy
+from .selection_function import ExponentialSelectionFunction, LinearSelectionFunction
 
 def build_transformation(
     graph_name: str, graph_params: dict, random_projection: bool = False,

@@ -1,7 +1,7 @@
 
 import torch
 
-class ExponentialDecaySelectionFunction:
+class ExponentialSelectionFunction:
     """ Selection function with exponential decay probability based on radial distance """
     def __init__(self, alpha_range=(0.1, 2.0), norm_range=(0.5, 1.0)):
         """
@@ -97,8 +97,39 @@ class ExponentialDecaySelectionFunction:
 
         return batch
 
+    def get_functional_form(self, N=100, alpha=None, norm=None):
+        """
+        Return the functional form for normalized radius.
 
-class LinearDecaySelectionFunction:
+        Args:
+            N: Number of points to sample
+
+        Returns:
+            x: Normalized radius values from 0 to 1
+            y: Selection probability values corresponding to x
+        """
+        # Sample random alpha and normalization for demonstration
+        if alpha is None:
+            # Sample alpha from the defined range
+            alpha = (torch.rand(1) *
+                    (self.alpha_range[1] - self.alpha_range[0]) +
+                    self.alpha_range[0]).item()
+        if norm is None:
+            # Sample norm from the defined range
+            norm = (torch.rand(1) *
+                (self.norm_range[1] - self.norm_range[0]) +
+                self.norm_range[0]).item()
+
+        # Create normalized radius values from 0 to 1
+        x = torch.linspace(0, 1, N)
+
+        # Apply exponential decay: p = norm * exp(-alpha * r_norm)
+        y = norm * torch.exp(-alpha * x)
+
+        return x, y
+
+
+class LinearSelectionFunction:
     """ Selection function with linear decay probability based on radial distance """
     def __init__(self, p_min_range=(0.0, 0.3), p_max_range=(0.7, 1.0)):
         """
@@ -197,6 +228,37 @@ class LinearDecaySelectionFunction:
 
         return batch
 
+    def get_functional_form(self, N=100, p_min=None, p_max=None):
+        """
+        Return the functional form for normalized radius.
+
+        Args:
+            N: Number of points to sample
+
+        Returns:
+            x: Normalized radius values from 0 to 1
+            y: Selection probability values corresponding to x
+        """
+        # Sample random p_min and p_max for demonstration
+        if p_min is None:
+            # Sample p_min from the defined range
+            p_min = (torch.rand(1) *
+                    (self.p_min_range[1] - self.p_min_range[0]) +
+                    self.p_min_range[0]).item()
+        if p_max is None:
+            # Sample p_max from the defined range
+            p_max = (torch.rand(1) *
+                    (self.p_max_range[1] - self.p_max_range[0]) +
+                    self.p_max_range[0]).item()
+
+        # Create normalized radius values from 0 to 1
+        x = torch.linspace(0, 1, N)
+
+        # Apply linear decay: p = p_max + (p_min - p_max) * r_norm
+        y = p_max + (p_min - p_max) * x
+
+        return x, y
+
 
 class RadialSelectionFunction:
     """ Selection function with various modes """
@@ -267,40 +329,152 @@ class RadialSelectionFunction:
 class RandomSelectionStrategy:
     """
     Randomly applies different node selection strategies with specified probabilities.
+    Supports RadialSelectionFunction, LinearSelectionFunction, and
+    ExponentialSelectionFunction.
     """
-    def __init__(self, modes=['low', 'high', 'dropout', 'identity'], probs=None, q_min=0.1, q_max=0.5):
+    def __init__(self, selection_configs, probs=None):
         """
         Args:
-            modes: List of selection modes ('low', 'high', 'dropout', 'identity')
-                  - 'low': Select nodes with radius <= quantile
-                  - 'high': Select nodes with radius >= quantile
-                  - 'dropout': Randomly drop nodes with probability = quantile
-                  - 'identity': Keep all nodes (no filtering)
-            probs: List of probabilities for each mode (must sum to 1.0)
-            q_min: Minimum quantile value
-            q_max: Maximum quantile value
+            selection_configs: List of dictionaries, each containing:
+                - 'type': 'radial', 'linear', or 'exponential'
+                - 'params': dictionary of parameters for that selection function
+            probs: List of probabilities for each selection config (must sum to 1.0)
+                  If None, uses equal probability for each config
+
+        Example:
+            selection_configs = [
+                {'type': 'radial', 'params': {'q_min': 0.1, 'q_max': 0.5, 'mode': 'low'}},
+                {'type': 'radial', 'params': {'q_min': 0.3, 'q_max': 0.7, 'mode': 'high'}},
+                {'type': 'linear', 'params': {'p_min_range': (0.0, 0.3),
+                                              'p_max_range': (0.7, 1.0)}},
+                {'type': 'exponential', 'params': {'alpha_range': (0.1, 2.0),
+                                                   'norm_range': (0.5, 1.0)}}
+            ]
         """
-        self.modes = modes
+        self.selection_configs = selection_configs
+
         if probs is None:
-            # Equal probability for each mode
-            self.probs = torch.ones(len(modes)) / len(modes)
+            # Equal probability for each config
+            self.probs = torch.ones(len(selection_configs)) / len(selection_configs)
         else:
-            assert len(probs) == len(modes), "Number of probabilities must match number of modes"
-            assert abs(sum(probs) - 1.0) < 1e-6, "Probabilities must sum to 1.0"
+            assert len(probs) == len(selection_configs), \
+                "Number of probabilities must match number of selection configs"
+            assert abs(sum(probs) - 1.0) < 1e-6, \
+                "Probabilities must sum to 1.0"
             self.probs = torch.tensor(probs)
 
-        self.q_min = q_min
-        self.q_max = q_max
+        # Create selection functions for each config
+        self.selection_functions = []
+        for config in selection_configs:
+            selection_type = config['type']
+            params = config['params']
 
-        # Create selection functions for each mode
-        self.selection_functions = {}
-        for mode in modes:
-            self.selection_functions[mode] = RadialSelectionFunction(q_min, q_max, mode)
+            if selection_type == 'radial':
+                func = RadialSelectionFunction(**params)
+            elif selection_type == 'linear':
+                func = LinearSelectionFunction(**params)
+            elif selection_type == 'exponential':
+                func = ExponentialSelectionFunction(**params)
+            else:
+                raise ValueError(f"Unknown selection type: {selection_type}")
+
+            self.selection_functions.append(func)
 
     def __call__(self, batch):
-        # Randomly select a mode based on probabilities
-        mode_idx = torch.multinomial(self.probs, 1).item()
-        selected_mode = self.modes[mode_idx]
+        # Randomly select a configuration based on probabilities
+        config_idx = torch.multinomial(self.probs, 1).item()
 
-        # Apply the selected mode's selection function
-        return self.selection_functions[selected_mode](batch)
+        # Apply the selected configuration's selection function
+        return self.selection_functions[config_idx](batch)
+
+    def add_selection_config(self, selection_config, prob=None):
+        """
+        Add a new selection configuration.
+
+        Args:
+            selection_config: Dictionary with 'type' and 'params'
+            prob: Probability for this config. If None, redistributes
+                 probabilities equally among all configs
+        """
+        self.selection_configs.append(selection_config)
+
+        # Create the new selection function
+        selection_type = selection_config['type']
+        params = selection_config['params']
+
+        if selection_type == 'radial':
+            func = RadialSelectionFunction(**params)
+        elif selection_type == 'linear':
+            func = LinearSelectionFunction(**params)
+        elif selection_type == 'exponential':
+            func = ExponentialSelectionFunction(**params)
+        else:
+            raise ValueError(f"Unknown selection type: {selection_type}")
+
+        self.selection_functions.append(func)
+
+        # Update probabilities
+        if prob is None:
+            # Redistribute equally
+            n_configs = len(self.selection_configs)
+            self.probs = torch.ones(n_configs) / n_configs
+        else:
+            # Normalize existing probabilities and add new one
+            current_sum = torch.sum(self.probs)
+            remaining_prob = 1.0 - prob
+            self.probs = self.probs * (remaining_prob / current_sum)
+            self.probs = torch.cat([self.probs, torch.tensor([prob])])
+
+    def get_config_info(self):
+        """Return information about current selection configurations."""
+        info = []
+        for i, (config, prob) in enumerate(zip(self.selection_configs, self.probs)):
+            info.append({
+                'index': i,
+                'type': config['type'],
+                'params': config['params'],
+                'probability': prob.item()
+            })
+        return info
+
+
+# class RandomSelectionStrategy:
+#     """
+#     Randomly applies different node selection strategies with specified probabilities.
+#     """
+#     def __init__(self, modes=['low', 'high', 'dropout', 'identity'], probs=None, q_min=0.1, q_max=0.5):
+#         """
+#         Args:
+#             modes: List of selection modes ('low', 'high', 'dropout', 'identity')
+#                   - 'low': Select nodes with radius <= quantile
+#                   - 'high': Select nodes with radius >= quantile
+#                   - 'dropout': Randomly drop nodes with probability = quantile
+#                   - 'identity': Keep all nodes (no filtering)
+#             probs: List of probabilities for each mode (must sum to 1.0)
+#             q_min: Minimum quantile value
+#             q_max: Maximum quantile value
+#         """
+#         self.modes = modes
+#         if probs is None:
+#             # Equal probability for each mode
+#             self.probs = torch.ones(len(modes)) / len(modes)
+#         else:
+#             assert len(probs) == len(modes), "Number of probabilities must match number of modes"
+#             assert abs(sum(probs) - 1.0) < 1e-6, "Probabilities must sum to 1.0"
+#             self.probs = torch.tensor(probs)
+
+#         self.q_min = q_min
+#         self.q_max = q_max
+
+#         # Create selection functions for each mode
+#         self.selection_functions = {}
+#         for mode in modes:
+#             self.selection_functions[mode] = RadialSelectionFunction(q_min, q_max, mode)
+
+#     def __call__(self, batch):
+#         # Randomly select a mode based on probabilities
+#         mode_idx = torch.multinomial(self.probs, 1).item()
+#         selected_mode = self.modes[mode_idx]
+
+#         # Apply the selected mode's selection function
+#         return self.selection_functions[selected_mode](batch)
