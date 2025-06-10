@@ -46,10 +46,10 @@ class RadialSelectionFunction:
             diff = radii - torch.repeat_interleave(radii_q, n_per_batch)
 
             if self.mode == 'low':
-                # For low mode, select negative differences
+                # For low mode, select negative differences, i.e. take nodes with radius <= quantile
                 mask = diff <= 0
             elif self.mode == 'high':
-                # For high mode, select positive differences
+                # For high mode, select positive differences, i.e. take nodes with radius >= quantile
                 mask = diff >= 0
             else:
                 raise ValueError(f"Unknown mode: {self.mode}")
