@@ -34,5 +34,14 @@ class Normalize:
         batch = batch.clone()
         x_loc = self.x_loc.to(batch.x.device)
         x_scale = self.x_scale.to(batch.x.device)
+
+        # If UncertaintySampler is called, it will increase the number of features by 1
+        # to account for this, we add a feature to x_loc and x_scale if mismatch in dimensions
+        # x_loc and x_scale should be 0 and 1 respectively for the additional feature
+        # TODO: This is a temporary fix, should be handled better in the future
+        if x_loc.shape[0] != batch.x.shape[1]:
+            x_loc = torch.cat([x_loc, torch.zeros(1, device=x_loc.device)])
+            x_scale = torch.cat([x_scale, torch.ones(1, device=x_scale.device)])
+
         batch.x = (batch.x - x_loc) / x_scale
         return batch
