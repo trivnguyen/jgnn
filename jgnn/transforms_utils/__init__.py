@@ -2,14 +2,16 @@
 import torch
 from torch_geometric import transforms as T
 
-from .basic import GetNodeFeatures
+from .basic import GetNodeFeatures, Normalize
 from .projection import RandomProjection
 from .selection_function import RadialSelectionFunction, RandomSelectionStrategy
 from .selection_function import ExponentialSelectionFunction, LinearSelectionFunction
+from .uncertainty import UncertaintySampler
 
 def build_transformation(
     graph_name: str, graph_params: dict, random_projection: bool = False,
     selection: bool = False, selection_args: dict = None,
+    uncertainty: bool = False, uncertainty_args: dict = None,
     norm_dict = None
 ):
     """ Build the transformation pipeline """
@@ -24,18 +26,26 @@ def build_transformation(
 
     # apply radial selection if specified
     if selection:
-        # transforms.append(RadialSelectionFunction(**selection_args))
+        if selection_args is None:
+            raise ValueError("Selection arguments must be provided when selection is enabled.")
         transforms.append(RandomSelectionStrategy(**selection_args))
 
     # if random projection or selection is applied, we need to re-compute node features
     # otherwise, we assume that node features are already computed
     if random_projection or selection:
-        if norm_dict is None:
-            transforms.append(GetNodeFeatures())
-        else:
-            transforms.append(GetNodeFeatures(norm_dict['x_loc'], norm_dict['x_scale']))
+        transforms.append(GetNodeFeatures())
 
-    # graph transformation
+    # add uncertainty
+    if uncertainty:
+        if uncertainty_args is None:
+            raise ValueError("Uncertainty arguments must be provided when uncertainty is enabled.")
+        transforms.append(UncertaintySampler(**uncertainty_args))
+
+    # normalize
+    if norm_dict is not None:
+        transforms.append(Normalize(norm_dict['x_loc'], norm_dict['x_scale']))
+
+    # connect edges based on the specified graph type
     if graph_name.lower() == "knn":
         transforms.append(T.KNNGraph(**graph_params))
     elif graph_name.lower() == "radius":

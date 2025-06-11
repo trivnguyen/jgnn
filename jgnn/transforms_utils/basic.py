@@ -3,6 +3,24 @@ import torch
 
 class GetNodeFeatures:
     """ Extract node features from the input batch """
+    def __init__(self log=True):
+        self.log = log
+
+    def __call__(self, batch):
+        batch = batch.clone()
+        rad = torch.norm(batch.pos, dim=1).unsqueeze(1)
+        vel = torch.norm(batch.vel, dim=1).unsqueeze(1)
+
+        # Apply logarithmic transformation to radius and velocity
+        if self.log:
+            rad = torch.log10(rad + 1e-6)
+            vel = torch.log10(vel + 1e-6)
+        x = torch.cat([rad, vel], dim=1)
+        batch.x = x
+        return batch
+
+class Normalize:
+    """ Extract node features from the input batch """
     def __init__(self, x_loc=0, x_scale=1):
         # Convert inputs to tensors if they aren't already
         if not isinstance(x_loc, torch.Tensor):
@@ -14,11 +32,6 @@ class GetNodeFeatures:
 
     def __call__(self, batch):
         batch = batch.clone()
-        rad = torch.norm(batch.pos, dim=1).unsqueeze(1)
-        vel = torch.norm(batch.vel, dim=1).unsqueeze(1)
-        log_rad = torch.log10(rad + 1e-6)
-        log_vel = torch.log10(vel + 1e-6)
-        x = torch.cat([log_rad, log_vel], dim=1)
         x = (x - self.x_loc.to(x.device)) / self.x_scale.to(x.device)
         batch.x = x
         return batch
