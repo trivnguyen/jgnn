@@ -107,3 +107,4 @@ class UncertaintySampler:
             'distribution_type': self.distribution_type,
             'parameters': self.params
         }
+
