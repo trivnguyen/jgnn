@@ -103,6 +103,8 @@ class NPE(pl.LightningModule):
             random_projection=self.pre_transform_args.random_projection,
             selection=self.pre_transform_args.selection,
             selection_args=self.pre_transform_args.selection_params,
+            uncertainty=self.pre_transform_args.uncertainty,
+            uncertainty_args=self.pre_transform_args.uncertainty_params,
             norm_dict=self.norm_dict
         )
 
