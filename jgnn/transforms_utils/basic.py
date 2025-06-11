@@ -3,7 +3,7 @@ import torch
 
 class GetNodeFeatures:
     """ Extract node features from the input batch """
-    def __init__(self log=True):
+    def __init__(self, log=True):
         self.log = log
 
     def __call__(self, batch):
@@ -32,6 +32,7 @@ class Normalize:
 
     def __call__(self, batch):
         batch = batch.clone()
-        x = (x - self.x_loc.to(x.device)) / self.x_scale.to(x.device)
-        batch.x = x
+        x_loc = self.x_loc.to(batch.x.device)
+        x_scale = self.x_scale.to(batch.x.device)
+        batch.x = (batch.x - x_loc) / x_scale
         return batch
