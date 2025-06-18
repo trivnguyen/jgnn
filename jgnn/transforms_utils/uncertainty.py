@@ -95,7 +95,8 @@ class UncertaintySampler:
         data[:, self.feature_idx] += noise
 
         # Append uncertainty values as a new feature column
-        std_column = std_values.unsqueeze(1).detach()  # Shape: [N_batch, 1]
+        # make sure that the true noise is not included in the original data
+        std_column = std_values.unsqueeze(1)  # Shape: [N_batch, 1]
         data = torch.cat([data, std_column], dim=1)
 
         batch.x = data
