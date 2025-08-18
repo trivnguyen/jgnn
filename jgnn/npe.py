@@ -100,11 +100,11 @@ class NPE(pl.LightningModule):
         self.pre_transform = transforms_utils.build_transformation(
             graph_name=self.pre_transform_args.graph_name,
             graph_params=self.pre_transform_args.graph_params,
-            random_projection=self.pre_transform_args.random_projection,
-            selection=self.pre_transform_args.selection,
-            selection_args=self.pre_transform_args.selection_params,
-            uncertainty=self.pre_transform_args.uncertainty,
-            uncertainty_args=self.pre_transform_args.uncertainty_params,
+            random_projection=self.pre_transform_args.get('random_projection', False),
+            selection=self.pre_transform_args.get('selection', False),
+            selection_args=self.pre_transform_args.get('selection_params', {}),
+            uncertainty=self.pre_transform_args.get('uncertainty', False),
+            uncertainty_args=self.pre_transform_args.get('uncertainty_params', {}),
             norm_dict=self.norm_dict
         )
 
@@ -113,6 +113,10 @@ class NPE(pl.LightningModule):
         if self.pre_transform is not None:
             batch = self.pre_transform(batch)
         batch = batch.to(self.device)
+        if not hasattr(batch, 'cond'):
+            cond = None
+        else:
+            cond = batch.cond
         batch_dict = {
             'x': batch.x,
             'theta': batch.theta,
@@ -121,7 +125,7 @@ class NPE(pl.LightningModule):
             'edge_weight': batch.edge_weight,
             'batch': batch.batch,
             'batch_size': len(batch),
-            'cond': batch.cond if hasattr(batch, 'cond') else None,
+            'cond': cond
         }
         return batch_dict
 
