@@ -12,7 +12,7 @@ def build_transformation(
     graph_name: str, graph_params: dict, random_projection: bool = False,
     selection: bool = False, selection_args: dict = None,
     uncertainty: bool = False, uncertainty_args: dict = None,
-    norm_dict = None
+    norm_dict = None, log: bool = True
 ):
     """ Build the transformation pipeline """
     transforms = []
@@ -33,7 +33,7 @@ def build_transformation(
     # if random projection or selection is applied, we need to re-compute node features
     # otherwise, we assume that node features are already computed
     if random_projection or selection:
-        transforms.append(GetNodeFeatures())
+        transforms.append(GetNodeFeatures(log=log))
 
     # add uncertainty
     if uncertainty:

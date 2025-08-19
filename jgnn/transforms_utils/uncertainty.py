@@ -92,7 +92,7 @@ class UncertaintySampler:
         # Sample uncertainty and apply to the specified feature index
         std_values = self.sample_uncertainty_std(len(data))  # sample
         noise = torch.normal(0, std_values)
-        data[:, self.feature_idx] += noise
+        data[:, self.feature_idx] += noise # Apply noise to the specified feature
 
         # Append uncertainty values as a new feature column
         # make sure that the true noise is not included in the original data

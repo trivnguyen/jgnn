@@ -9,12 +9,11 @@ class GetNodeFeatures:
     def __call__(self, batch):
         batch = batch.clone()
         rad = torch.norm(batch.pos, dim=1).unsqueeze(1)
-        vel = torch.norm(batch.vel, dim=1).unsqueeze(1)
+        vel = batch.vel.unsqueeze(1)
 
-        # Apply logarithmic transformation to radius and velocity
+        # Apply logarithmic transformation to the radius
         if self.log:
             rad = torch.log10(rad + 1e-6)
-            vel = torch.log10(vel + 1e-6)
         x = torch.cat([rad, vel], dim=1)
         batch.x = x
         return batch
