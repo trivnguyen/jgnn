@@ -181,9 +181,8 @@ def prepare_dataloaders(
             rad3d = torch.norm(pos, dim=1).view(-1, 1)
             vel3d = torch.norm(vel, dim=1).view(-1, 1)
             log_rad = torch.log10(rad3d + 1e-6)
-            log_vel = torch.log10(vel3d + 1e-6)
-            x_loc = torch.cat([log_rad, log_vel], dim=1).mean(dim=0)
-            x_scale = torch.cat([log_rad, log_vel], dim=1).std(dim=0)
+            x_loc = torch.cat([log_rad, vel3d], dim=1).mean(dim=0)
+            x_scale = torch.cat([log_rad, vel3d], dim=1).std(dim=0)
 
             # min max normalization for Theta [-1, 1] instead
             theta_min = theta_train.min(dim=0)[0]
