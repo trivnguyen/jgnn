@@ -65,6 +65,20 @@ class UncertaintySampler:
             samples = truncnorm.rvs(a, b, loc=mean, scale=std, size=n_samples)
             std_values = torch.tensor(samples, dtype=torch.float32)
 
+        elif self.distribution_type == 'jeffreys':
+            # Jeffreys prior for a Gaussian with known mean: p(sigma) = 1 / sigma
+            # This assumes the mean is known and we're only estimating sigma
+            low = self.params['low']
+            high = self.params['high']
+            if low <= 0 or high <= 0:
+                raise ValueError("Jeffreys prior requires 'low' and 'high' to be positive")
+
+            # sample log sigma uniformly to get p(sigma) ∝ 1/sigma
+            log_low = np.log(low)
+            log_high = np.log(high)
+            log_std_values = torch.rand(n_samples) * (log_high - log_low) + log_low
+            std_values = torch.exp(log_std_values)
+
         return std_values.detach()
 
     def __call__(self, batch):
