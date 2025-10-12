@@ -1,5 +1,6 @@
 
 import torch
+import numpy as np
 from scipy.stats import truncnorm
 
 class UncertaintySampler:
@@ -33,6 +34,14 @@ class UncertaintySampler:
                 raise ValueError("Gaussian distribution requires 'mean' and 'std' parameters")
             if params['mean'] < 0 or params['std'] < 0:
                 raise ValueError("Uncertainty parameters must be non-negative")
+
+        elif distribution_type == 'jeffreys':
+            if 'low' not in params or 'high' not in params:
+                raise ValueError("Jeffreys prior requires 'low' and 'high' parameters")
+            if params['low'] <= 0 or params['high'] <= 0:
+                raise ValueError("'low' and 'high' must be positive for Jeffreys prior")
+            if params['low'] > params['high']:
+                raise ValueError("'low' must be <= 'high' for Jeffreys prior")
 
         else:
             raise ValueError(f"Unknown distribution type: {distribution_type}")
