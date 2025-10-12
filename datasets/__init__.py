@@ -199,10 +199,10 @@ def prepare_dataloaders(
 
     if norm_version == 'v1':
         for g in train_graphs:
-            g.x = (g.x - x_loc) / x_scale
+            # g.x = (g.x - x_loc) / x_scale
             g.theta = (g.theta - theta_loc) / theta_scale
         for g in val_graphs:
-            g.x = (g.x - x_loc) / x_scale
+            # g.x = (g.x - x_loc) / x_scale
             g.theta = (g.theta - theta_loc) / theta_scale
     elif norm_version == 'v2':
         for g in train_graphs:
