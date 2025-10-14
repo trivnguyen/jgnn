@@ -42,7 +42,15 @@ class UncertaintySampler:
                 raise ValueError("'low' and 'high' must be positive for Jeffreys prior")
             if params['low'] > params['high']:
                 raise ValueError("'low' must be <= 'high' for Jeffreys prior")
-
+        elif distribution_type == 'gamma':
+            if 'alpha' not in params or 'beta' not in params or 'x0' not in params:
+                raise ValueError("Gamma distribution requires 'alpha', 'beta', and 'x0' parameters")
+            if params['alpha'] < -1:
+                raise ValueError("'alpha' must be > -1)
+            if params['beta'] <= 0:
+                raise ValueError("'beta' must be > 0")
+            if params['x0'] <= 0:
+                raise ValueError("'x0' must be > 0")
         else:
             raise ValueError(f"Unknown distribution type: {distribution_type}")
 
@@ -87,6 +95,19 @@ class UncertaintySampler:
             log_high = np.log(high)
             log_std_values = torch.rand(n_samples) * (log_high - log_low) + log_low
             std_values = torch.exp(log_std_values)
+
+        elif self.distribution_type == 'gamma':
+            alpha = self.params['alpha']
+            beta = self.params['beta']
+            x0 = self.params['x0']
+
+            # shape parameter for gamma distribution
+            k = (alpha + 1) / beta
+
+            # Sample from Gamma(k, 1) distribution and x = x0 * z^(1 / beta)
+            gamma_dist = torch.distributions.Gamma(k, torch.ones_like(k))
+            z = gamma_dist.sample((n_samples,))
+            std_values = x0 * torch.pow(z, 1 / beta)
 
         return std_values.detach()
 
