@@ -94,7 +94,7 @@ def read_datasets(
             if not os.path.exists(data_path):
                 break
             nodes, graphs, _ = read_graph_dataset(
-                data_path, concat=True)
+                data_path, concat=concat)
 
             # append to the dataset
             for k in nodes:
@@ -111,7 +111,7 @@ def read_datasets(
     else:
         data_path  = os.path.join(root, name + ".hdf5")
         node_feats, graph_feats, _ = read_graph_dataset(
-            data_path, concat=True)
+            data_path, concat=concat)
 
     return node_feats, graph_feats
 
