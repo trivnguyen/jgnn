@@ -46,7 +46,7 @@ class UncertaintySampler:
             if 'alpha' not in params or 'beta' not in params or 'x0' not in params:
                 raise ValueError("Gamma distribution requires 'alpha', 'beta', and 'x0' parameters")
             if params['alpha'] < -1:
-                raise ValueError("'alpha' must be > -1)
+                raise ValueError("'alpha' must be > -1")
             if params['beta'] <= 0:
                 raise ValueError("'beta' must be > 0")
             if params['x0'] <= 0:
@@ -105,7 +105,7 @@ class UncertaintySampler:
             k = (alpha + 1) / beta
 
             # Sample from Gamma(k, 1) distribution and x = x0 * z^(1 / beta)
-            gamma_dist = torch.distributions.Gamma(k, torch.ones_like(k))
+            gamma_dist = torch.distributions.Gamma(k, 1)
             z = gamma_dist.sample((n_samples,))
             std_values = x0 * torch.pow(z, 1 / beta)
 
