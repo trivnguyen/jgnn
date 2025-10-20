@@ -35,12 +35,23 @@ def train(
         if config.overwrite:
             shutil.rmtree(workdir)
         elif config.get('checkpoint', None) is not None:
-            checkpoint_path = os.path.join(
-                workdir, 'lightning_logs/checkpoints', config.checkpoint)
+            # Check if checkpoint is absolute path or relative
+            if os.path.isabs(config.checkpoint):
+                checkpoint_path = config.checkpoint
+            else:
+                checkpoint_path = os.path.join(
+                    workdir, 'lightning_logs/checkpoints', config.checkpoint)
         else:
             raise ValueError(
                 f"Workdir {workdir} already exists. Please set overwrite=True "
                 "to overwrite the existing directory.")
+    elif config.get('checkpoint', None) is not None:
+        # workdir doesn't exist but checkpoint specified (transfer learning case)
+        if os.path.isabs(config.checkpoint):
+            checkpoint_path = config.checkpoint
+        else:
+            raise ValueError(
+                f"Checkpoint path must be absolute when workdir doesn't exist: {config.checkpoint}")
 
     # copy yaml file
     os.makedirs(workdir, exist_ok=True)
@@ -98,12 +109,16 @@ def train(
     # train the model
     logging.info("Training model...")
     pl.seed_everything(config.seed_training)
-    trainer.fit(
-        model,
-        train_loader,
-        val_loader,
-        ckpt_path=checkpoint_path
-    )
+
+    # Handle transfer learning: load checkpoint but reset optimizer if requested
+    if checkpoint_path is not None and config.get('reset_optimizer', False):
+        logging.info(f"Loading checkpoint from {checkpoint_path} with fresh optimizer")
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['state_dict'])
+        trainer.fit(model, train_loader, val_loader)
+    else:
+        trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
+
 
 if __name__ == "__main__":
     FLAGS = flags.FLAGS
