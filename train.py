@@ -31,27 +31,25 @@ def train(
 
     workdir = os.path.join(workdir, name)
     checkpoint_path = None
-    if os.path.exists(workdir):
-        if config.overwrite:
-            shutil.rmtree(workdir)
-        elif config.get('checkpoint', None) is not None:
-            # Check if checkpoint is absolute path or relative
-            if os.path.isabs(config.checkpoint):
-                checkpoint_path = config.checkpoint
-            else:
-                checkpoint_path = os.path.join(
-                    workdir, 'lightning_logs/checkpoints', config.checkpoint)
-        else:
-            raise ValueError(
-                f"Workdir {workdir} already exists. Please set overwrite=True "
-                "to overwrite the existing directory.")
-    elif config.get('checkpoint', None) is not None:
-        # workdir doesn't exist but checkpoint specified (transfer learning case)
+
+    if config.get('checkpoint', None) is not None:
         if os.path.isabs(config.checkpoint):
             checkpoint_path = config.checkpoint
         else:
+            checkpoint_path = os.path.join(
+                workdir, 'lightning_logs/checkpoints', config.checkpoint)
+
+    if os.path.exists(workdir):
+        if config.overwrite:
+            shutil.rmtree(workdir)
+            os.makedirs(workdir, exist_ok=True)
+        elif checkpoint_path is None:
             raise ValueError(
-                f"Checkpoint path must be absolute when workdir doesn't exist: {config.checkpoint}")
+                f"Workdir {workdir} already exists. Please set overwrite=True "
+                "to overwrite the existing directory, or specify a checkpoint to resume.")
+    else:
+        os.makedirs(workdir, exist_ok=True)
+
 
     # copy yaml file
     os.makedirs(workdir, exist_ok=True)
@@ -113,10 +111,11 @@ def train(
     # Handle transfer learning: load checkpoint but reset optimizer if requested
     if checkpoint_path is not None and config.get('reset_optimizer', False):
         logging.info(f"Loading checkpoint from {checkpoint_path} with fresh optimizer")
-        checkpoint = torch.load(checkpoint_path)
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
         model.load_state_dict(checkpoint['state_dict'])
         trainer.fit(model, train_loader, val_loader)
     else:
+        logging.info(f"Loading checkpoint from {checkpoint_path} with full state")
         trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
 
 
