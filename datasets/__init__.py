@@ -7,8 +7,9 @@ import numpy as np
 import torch
 import pytorch_lightning as pl
 from tqdm import tqdm
+from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader as PyGDataLoader
 
 from . import preprocess
 
@@ -115,6 +116,8 @@ def read_datasets(
 
     return node_feats, graph_feats
 
+
+### For inference task ###
 def prepare_dataloaders(
     node_feats, graph_feats, labels, train_frac=0.8, train_batch_size=32,
     eval_batch_size=32, num_workers=1, norm_dict=None, seed=0,
@@ -211,10 +214,10 @@ def prepare_dataloaders(
             g.theta = (g.theta - theta_loc) / theta_scale
 
     # create data loaders
-    train_loader = DataLoader(
+    train_loader = PyGDataLoader(
         train_graphs, batch_size=train_batch_size, shuffle=True,
         num_workers=num_workers, pin_memory=False)
-    val_loader = DataLoader(
+    val_loader = PyGDataLoader(
         val_graphs, batch_size=eval_batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=False)
 
@@ -307,8 +310,115 @@ def prepare_test_dataloader(
             g.theta = (g.theta - theta_loc) / theta_scale
 
     # create data loaders
-    loader = DataLoader(
+    loader = PyGDataLoader(
         graphs, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=False)
 
     return loader, norm_dict
+
+### For reconstruction task ###
+def prepare_dataloaders_recon(
+    node_feats, graph_feats, labels, train_frac=0.8, train_batch_size=32,
+    eval_batch_size=32, num_subsampling=None, num_workers=1, norm_dict=None,
+    seed=0,
+):
+    """ Prepare the dataloaders for training and validation. """
+
+    pl.seed_everything(seed)
+
+    num_graphs = len(graph_feats['num_stars'])
+    ptr = np.cumsum(graph_feats['num_stars'])
+    ptr = np.insert(ptr, 0, 0)
+
+    loop = tqdm(range(num_graphs), miniters=num_graphs // 100, desc='Creating dataloader')
+
+    pos_train, vel_true_train, theta_train = [], [], []
+    pos_val, vel_true_val, theta_val = [], [], []
+    for i in loop:
+        pos = node_feats['pos'][ptr[i]:ptr[i+1]]
+        vel_true = node_feats['vel_true'][ptr[i]:ptr[i+1]]
+        theta = np.array([graph_feats[k][i] for k in labels])
+
+        # subsample the stars if needed
+        if num_subsampling is not None and num_subsampling < len(pos):
+            idx = np.random.choice(len(pos), num_subsampling, replace=False)
+            pos = pos[idx]
+            vel_true = vel_true[idx]
+
+        pos = np.log10(np.linalg.norm(pos, axis=1).reshape(-1, 1))
+        vel_true = vel_true.reshape(-1, 1)
+        theta = np.repeat(theta.reshape(1, -1), len(pos), axis=0)
+
+        # decide whether to put the graph in train or val set
+        if np.random.rand() < train_frac:
+            pos_train.append(pos)
+            vel_true_train.append(vel_true)
+            theta_train.append(theta)
+        else:
+            pos_val.append(pos)
+            vel_true_val.append(vel_true)
+            theta_val.append(theta)
+
+    pos_train = np.concatenate(pos_train, axis=0)
+    vel_true_train = np.concatenate(vel_true_train, axis=0)
+    theta_train = np.concatenate(theta_train, axis=0)
+    pos_val = np.concatenate(pos_val, axis=0)
+    vel_true_val = np.concatenate(vel_true_val, axis=0)
+    theta_val = np.concatenate(theta_val, axis=0)
+
+    # Normalize the data
+    if norm_dict is not None:
+        pos_loc = np.array(norm_dict['pos_loc'])
+        pos_scale = np.array(norm_dict['pos_scale'])
+        theta_loc = np.array(norm_dict['theta_loc'])
+        theta_scale = np.array(norm_dict['theta_scale'])
+        vel_true_loc = np.array(norm_dict['vel_true_loc'])
+        vel_true_scale = np.array(norm_dict['vel_true_scale'])
+    else:
+        pos_loc, pos_scale = pos_train.mean(0), pos_train.std(0)
+        theta_loc, theta_scale = theta_train.mean(0), theta_train.std(0)
+        vel_true_min, vel_true_max = vel_true_train.min(0), vel_true_train.max(0)
+        vel_true_loc = (vel_true_min + vel_true_max) / 2
+        vel_true_scale = (vel_true_max - vel_true_min) / 2
+
+        norm_dict = {
+            'pos_loc': list(pos_loc),
+            'pos_scale': list(pos_scale),
+            'theta_loc': list(theta_loc),
+            'theta_scale': list(theta_scale),
+            'vel_true_loc': list(vel_true_loc),
+            'vel_true_scale': list(vel_true_scale),
+        }
+
+    pos_train = (pos_train - pos_loc) / pos_scale
+    vel_true_train = (vel_true_train - vel_true_loc) / vel_true_scale
+    theta_train = (theta_train - theta_loc) / theta_scale
+    pos_val = (pos_val - pos_loc) / pos_scale
+    vel_true_val = (vel_true_val - vel_true_loc) / vel_true_scale
+    theta_val = (theta_val - theta_loc) / theta_scale
+
+    # create data loaders
+    train_loader = DataLoader(
+        TensorDataset(
+            torch.tensor(pos_train, dtype=torch.float32),
+            torch.tensor(vel_true_train, dtype=torch.float32),
+            torch.tensor(theta_train, dtype=torch.float32),
+        ),
+        batch_size=train_batch_size,
+        num_workers=num_workers,
+        shuffle=True,
+        pin_memory=False,
+    )
+    val_loader = DataLoader(
+        TensorDataset(
+            torch.tensor(pos_val, dtype=torch.float32),
+            torch.tensor(vel_true_val, dtype=torch.float32),
+            torch.tensor(theta_val, dtype=torch.float32),
+        ),
+        batch_size=eval_batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        pin_memory=False
+    )
+
+    return train_loader, val_loader, norm_dict

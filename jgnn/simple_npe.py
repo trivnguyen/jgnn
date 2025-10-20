@@ -1,11 +1,34 @@
 
 from typing import List, Dict, Any, Tuple
 
+import torch
+import numpy as np
 import pytorch_lightning as pl
 import pytorch_lightning.loggers as pl_loggers
 from ml_collections import ConfigDict
 from jgnn import flows_utils
 from jgnn import flows_utils, transforms_utils, models_utils, models
+
+
+def sample_uncertainties(n_samples, low=0.1, high=20.0, vel_scale=1.0):
+    if low <= 0 or high <= 0:
+        raise ValueError("Jeffreys prior requires 'low' and 'high' to be positive")
+
+    # sample log sigma uniformly to get p(sigma) ∝ 1/sigma
+    log_low = np.log(low)
+    log_high = np.log(high)
+    log_std_values = torch.rand(n_samples) * (log_high - log_low) + log_low
+    std_values = torch.exp(log_std_values) / vel_scale
+
+    return std_values.reshape(-1, 1)
+
+def uncertainty_model(vel_true, vel_scale):
+    std_values = sample_uncertainties(len(vel_true), vel_scale=vel_scale)
+    eps = torch.randn(len(vel_true), 1, device=vel_true.device)
+
+    vel_obs = vel_true + eps * std_values.to(vel_true.device)
+    return vel_obs, std_values, vel_true
+
 
 class SimpleNPE(pl.LightningModule):
     def __init__(
@@ -58,7 +81,12 @@ class SimpleNPE(pl.LightningModule):
         """ Prepare the batch for the model """
         pos, vel_true, theta = batch
         vel_obs, std_values, vel_true = uncertainty_model(
-            vel_true, torch.tensor(vel_true_scale, dtype=torch.float32))
+            vel_true, torch.tensor(self.norm_dict['vel_true_scale'], dtype=torch.float32))
+        pos = pos.to(self.device)
+        vel_true = vel_true.to(self.device)
+        vel_obs = vel_obs.to(self.device)
+        std_values = std_values.to(self.device)
+        theta = theta.to(self.device)
 
         # create the input vector with pos, vel_obs, std_values, and theta
         x = torch.cat([pos, vel_obs, std_values, theta], dim=1)
