@@ -5,7 +5,7 @@ from torch_geometric.data import Data, Batch
 def apply_mask(batch, mask):
     """Apply a boolean mask to all relevant attributes of the batch."""
     data_list = []
-    for i in range(n_graph):
+    for i in range(batch.num_graphs):
         node_start, node_end = batch.ptr[i], batch.ptr[i + 1]
         graph_mask = mask[node_start:node_end]
         graph_data = batch[i]
