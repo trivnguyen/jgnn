@@ -13,6 +13,8 @@ def apply_mask(batch, mask):
             x=graph_data.x[graph_mask],
             pos=graph_data.pos[graph_mask],
             vel=graph_data.vel[graph_mask],
+            theta=graph_data.theta,
+            cond=graph_data.cond,
         )
         data_list.append(graph_data)
     batch = Batch.from_data_list(data_list)
