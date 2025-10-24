@@ -1,5 +1,22 @@
 
 import torch
+from torch_geometric.data import Data, Batch
+
+def apply_mask(batch, mask):
+    """Apply a boolean mask to all relevant attributes of the batch."""
+    data_list = []
+    for i in range(n_graph):
+        node_start, node_end = batch.ptr[i], batch.ptr[i + 1]
+        graph_mask = mask[node_start:node_end]
+        graph_data = batch[i]
+        graph_data = Data(
+            x=graph_data.x[graph_mask],
+            pos=graph_data.pos[graph_mask],
+            vel=graph_data.vel[graph_mask],
+        )
+        data_list.append(graph_data)
+    batch = Batch.from_data_list(data_list)
+    return batch
 
 class ExponentialSelectionFunction:
     """ Selection function with exponential decay probability based on radial distance """
@@ -214,19 +231,19 @@ class LinearSelectionFunction:
         random_vals = torch.rand(batch.num_nodes, device=batch.pos.device)
         mask = random_vals < all_probs
 
+        # # Apply mask to all relevant attributes
+        # batch.x = batch.x[mask]
+        # batch.pos = batch.pos[mask]
+        # batch.vel = batch.vel[mask]
+        # batch.batch = batch.batch[mask]
+        # # Recalculate ptr
+        # batch.ptr = torch.searchsorted(
+        #     batch.batch,
+        #     torch.arange(n_graph+1, device=batch.batch.device)
+        # )
+
         # Apply mask to all relevant attributes
-        batch.x = batch.x[mask]
-        batch.pos = batch.pos[mask]
-        batch.vel = batch.vel[mask]
-        batch.batch = batch.batch[mask]
-
-        # Recalculate ptr
-        batch.ptr = torch.searchsorted(
-            batch.batch,
-            torch.arange(n_graph+1, device=batch.batch.device)
-        )
-
-        return batch
+        return apply_mask(batch, mask)
 
     def get_functional_form(self, N=100, p_min=None, p_max=None):
         """
@@ -305,25 +322,27 @@ class RadialSelectionFunction:
             # Calculate differences between radii and repeated quantile values
             diff = radii - torch.repeat_interleave(radii_q, n_per_batch)
 
-            if self.mode == 'low':
+            if self.mode in ('low', 'accept_low'):
                 # For low mode, select negative differences, i.e. take nodes with radius <= quantile
                 mask = diff <= 0
-            elif self.mode == 'high':
+            elif self.mode in ('high', 'accept_high'):
                 # For high mode, select positive differences, i.e. take nodes with radius >= quantile
                 mask = diff >= 0
             else:
                 raise ValueError(f"Unknown mode: {self.mode}")
 
+        # # Apply mask to all relevant attributes
+        # batch.x = batch.x[mask]
+        # batch.pos = batch.pos[mask]
+        # batch.vel = batch.vel[mask]
+        # batch.batch = batch.batch[mask]
+
+        # # Recalculate ptr and num nodes
+        # batch.ptr = torch.searchsorted(batch.batch, torch.arange(n_graph+1, device=batch.batch.device))
+        # batch.num_nodes = mask.sum().item()
+
         # Apply mask to all relevant attributes
-        batch.x = batch.x[mask]
-        batch.pos = batch.pos[mask]
-        batch.vel = batch.vel[mask]
-        batch.batch = batch.batch[mask]
-
-        # Recalculate ptr
-        batch.ptr = torch.searchsorted(batch.batch, torch.arange(n_graph+1, device=batch.batch.device))
-
-        return batch
+        return apply_mask(batch, mask)
 
 
 class RandomSelectionStrategy:
@@ -436,45 +455,3 @@ class RandomSelectionStrategy:
                 'probability': prob.item()
             })
         return info
-
-
-# class RandomSelectionStrategy:
-#     """
-#     Randomly applies different node selection strategies with specified probabilities.
-#     """
-#     def __init__(self, modes=['low', 'high', 'dropout', 'identity'], probs=None, q_min=0.1, q_max=0.5):
-#         """
-#         Args:
-#             modes: List of selection modes ('low', 'high', 'dropout', 'identity')
-#                   - 'low': Select nodes with radius <= quantile
-#                   - 'high': Select nodes with radius >= quantile
-#                   - 'dropout': Randomly drop nodes with probability = quantile
-#                   - 'identity': Keep all nodes (no filtering)
-#             probs: List of probabilities for each mode (must sum to 1.0)
-#             q_min: Minimum quantile value
-#             q_max: Maximum quantile value
-#         """
-#         self.modes = modes
-#         if probs is None:
-#             # Equal probability for each mode
-#             self.probs = torch.ones(len(modes)) / len(modes)
-#         else:
-#             assert len(probs) == len(modes), "Number of probabilities must match number of modes"
-#             assert abs(sum(probs) - 1.0) < 1e-6, "Probabilities must sum to 1.0"
-#             self.probs = torch.tensor(probs)
-
-#         self.q_min = q_min
-#         self.q_max = q_max
-
-#         # Create selection functions for each mode
-#         self.selection_functions = {}
-#         for mode in modes:
-#             self.selection_functions[mode] = RadialSelectionFunction(q_min, q_max, mode)
-
-#     def __call__(self, batch):
-#         # Randomly select a mode based on probabilities
-#         mode_idx = torch.multinomial(self.probs, 1).item()
-#         selected_mode = self.modes[mode_idx]
-
-#         # Apply the selected mode's selection function
-#         return self.selection_functions[selected_mode](batch)
