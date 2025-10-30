@@ -8,7 +8,7 @@ class UncertaintySampler:
     Samples uncertainty parameters from specified distributions and applies
     Gaussian noise to data along a specified axis.
     """
-    def __init__(self, distribution_type, feature_idx, **params):
+    def __init__(self, distribution_type, feature_idx, append_uncertainty=True, **params):
         """
         Args:
             distribution_type: 'uniform' or 'gaussian'
@@ -18,6 +18,7 @@ class UncertaintySampler:
         """
         self.distribution_type = distribution_type
         self.feature_idx = feature_idx
+        self.append_uncertainty = append_uncertainty
         self.params = params
 
         # Validate parameters
@@ -140,8 +141,9 @@ class UncertaintySampler:
 
         # Append uncertainty values as a new feature column
         # make sure that the true noise is not included in the original data
-        std_column = std_values.unsqueeze(1)  # Shape: [N_batch, 1]
-        data = torch.cat([data, std_column], dim=1)
+        if self.append_uncertainty:
+            std_column = std_values.unsqueeze(1)  # Shape: [N_batch, 1]
+            data = torch.cat([data, std_column], dim=1)
 
         batch.x = data
         return batch

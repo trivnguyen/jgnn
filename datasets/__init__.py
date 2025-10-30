@@ -93,9 +93,9 @@ def read_datasets(
         for i in tqdm(range(init, init + num_datasets)):
             data_path = os.path.join(root, name, "data.{}.hdf5".format(i))
             if not os.path.exists(data_path):
-                break
-            nodes, graphs, _ = read_graph_dataset(
-                data_path, concat=concat)
+                print(f"Warning: {data_path} does not exist. Skipping...")
+                continue
+            nodes, graphs, _ = read_graph_dataset(data_path, concat=concat)
 
             # append to the dataset
             for k in nodes:
