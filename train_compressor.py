@@ -1,3 +1,7 @@
+""" Training script for the compressor model. Can also be used for training
+compressor + NDE jointly
+"""
+
 
 import os
 import pickle
@@ -15,7 +19,7 @@ from absl import flags, logging
 from ml_collections import config_flags
 
 import datasets
-from jgnn import models, npe, utils
+from jgnn import models, npe
 
 logging.set_verbosity(logging.INFO)
 
@@ -23,10 +27,7 @@ def train(
     config: ml_collections.ConfigDict, workdir: str = "./logging/"
 ):
     # set up work directory
-    if not hasattr(config, "name"):
-        name = utils.get_random_name()
-    else:
-        name = config["name"]
+    name = config.get("name", "default_compressor")
     logging.info("Starting training run {} at {}".format(name, workdir))
 
     workdir = os.path.join(workdir, name)

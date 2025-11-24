@@ -23,6 +23,7 @@ class NPE(pl.LightningModule):
         scheduler_args: ConfigDict=None,
         conditional_mlp_args: ConfigDict=None,
         norm_dict: Dict[str, Any]=None,
+        freeze_components: List[str]=None,
     ):
         super().__init__()
         self.input_size = input_size
@@ -31,13 +32,18 @@ class NPE(pl.LightningModule):
         self.mlp_args = mlp_args
         self.flows_args = flows_args
         self.pre_transform_args = pre_transform_args
-        self.optimizer_args = optimizer_args
-        self.scheduler_args = scheduler_args
-        self.conditional_mlp_args = conditional_mlp_args
+        self.optimizer_args = optimizer_args or {}
+        self.scheduler_args = scheduler_args or {}
+        self.conditional_mlp_args = conditional_mlp_args or {}
         self.norm_dict = norm_dict
+        self.freeze_components = freeze_components or []
         self.save_hyperparameters()
 
         self._setup_model()
+
+    def _freeze_module(self, module: nn.Module):
+        for param in module.parameters():
+            param.requires_grad = False
 
     def _setup_model(self):
 
@@ -107,6 +113,13 @@ class NPE(pl.LightningModule):
             uncertainty_args=self.pre_transform_args.get('uncertainty_params', {}),
             norm_dict=self.norm_dict
         )
+
+        # freeze components if needed
+        for component in self.freeze_components:
+            if hasattr(self, component):
+                self._freeze_module(getattr(self, component))
+            else:
+                raise ValueError(f'Component {component} not found in the model.')
 
     def _prepare_batch(self, batch):
         """ Prepare the batch for the model """

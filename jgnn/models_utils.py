@@ -94,7 +94,9 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
             optimizer,
             decay_steps=scheduler_args.decay_steps,
             warmup_steps=scheduler_args.warmup_steps,
-            eta_min=scheduler_args.eta_min)
+            eta_min=scheduler_args.eta_min,
+            restart=scheduler_args.get('restart', False)
+        )
     else:
         raise NotImplementedError(
             "Scheduler {} not implemented".format(self.scheduler_args.name))
