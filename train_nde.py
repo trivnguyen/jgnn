@@ -33,6 +33,7 @@ def train(
 
     workdir = os.path.join(workdir, name)
 
+    # read in the checkpoint of the Embedding network
     if config.get('checkpoint', None) is not None:
         if os.path.isabs(config.checkpoint):
             checkpoint_path = config.checkpoint
@@ -41,13 +42,12 @@ def train(
                 workdir, 'lightning_logs/checkpoints', config.checkpoint)
     else:
         raise ValueError("Checkpoint must be specified.")
+    checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
 
+    # overwrite if specified
     if os.path.exists(workdir) and config.overwrite:
-            shutil.rmtree(workdir)
-            os.makedirs(workdir, exist_ok=True)
-    else:
-        os.makedirs(workdir, exist_ok=True)
-
+        shutil.rmtree(workdir)
+    os.makedirs(workdir, exist_ok=True)
 
     # copy yaml file
     os.makedirs(workdir, exist_ok=True)
@@ -56,15 +56,22 @@ def train(
         yaml.dump(config_dict, f)
 
     # read in the dataset and prepare the data loader for training
+    # NOTE: always keep norm_dict the same as the Embedding network, since we
+    # only train the NDE on the latent space
     node_feats, graph_feats = datasets.read_datasets(
         config.data_root, config.data_name, config.num_datasets,
-        config.is_directory, concat=True)
+        init=config.init, is_directory=True, concat=True)
     train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
         node_feats, graph_feats, config.labels, train_batch_size=config.train_batch_size,
         eval_batch_size=config.eval_batch_size, train_frac=config.train_frac,
         num_workers=config.num_workers, seed=config.seed_data,
         norm_version=config.get('norm_version', 'v2'),
+        norm_dict=checkpoint_dict['hyper_parameters']['norm_dict']
     )
+
+    # check if norm_dict is the same as the checkpoint
+    assert norm_dict == checkpoint_dict['hyper_parameters']['norm_dict'], \
+        "Something's wrong, norm_dict does not match the checkpoint's norm_dict."
 
     # create model
     model = npe.NPE(
@@ -74,8 +81,8 @@ def train(
         mlp_args=config.model.mlp,
         flows_args=config.model.flows,
         pre_transform_args=config.model.pre_transform,
-        optimizer_args=config.optimizer.gett('optimizer'),
-        scheduler_args=config.scheduler.get('scheduler),
+        optimizer_args=config.get('optimizer'),
+        scheduler_args=config.get('scheduler'),
         conditional_mlp_args=config.model.get('conditional_mlp'),
         freeze_components=['featurizer', 'mlp', 'conditional_mlp'],
         norm_dict=norm_dict,
@@ -109,17 +116,16 @@ def train(
     # train the model
     logging.info("Training model...")
     pl.seed_everything(config.seed_training)
-
     # load in the previous checkpoint
     if config.get('reset_optimizer', False):
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
         state_to_load = {
-            k: v for k, v in checkpoint['state_dict'].items() if k in config.load_parts}
+            k: v for k, v in checkpoint_dict['state_dict'].items() if k in config.load_parts}
         model.load_state_dict(state_to_load, strict=False)
         trainer.fit(model, train_loader, val_loader)
     else:
         logging.info(f"Loading checkpoint from {checkpoint_path} with full state")
         trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
+
 
 
 if __name__ == "__main__":

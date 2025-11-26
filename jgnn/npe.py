@@ -117,6 +117,7 @@ class NPE(pl.LightningModule):
         # freeze components if needed
         for component in self.freeze_components:
             if hasattr(self, component):
+                print(f'Freezing component: {component}')
                 self._freeze_module(getattr(self, component))
             else:
                 raise ValueError(f'Component {component} not found in the model.')
