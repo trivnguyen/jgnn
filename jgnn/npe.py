@@ -170,6 +170,9 @@ class NPE(pl.LightningModule):
 
         # log the loss
         self.log(
+            'train/loss', loss, on_step=True, on_epoch=True,
+            prog_bar=True, batch_size=batch_dict['batch_size'])
+        self.log(
             'train_loss', loss, on_step=True, on_epoch=True,
             prog_bar=True, batch_size=batch_dict['batch_size'])
         return loss
@@ -190,7 +193,10 @@ class NPE(pl.LightningModule):
 
         # log the loss
         self.log(
-            'val_loss', loss, on_step=True, on_epoch=True,
+            'val/loss', loss, on_step=False, on_epoch=True,
+            prog_bar=True, batch_size=batch_dict['batch_size'])
+        self.log(
+            'val_loss', loss, on_step=False, on_epoch=True,
             prog_bar=True, batch_size=batch_dict['batch_size'])
         return loss
 

@@ -96,7 +96,12 @@ def train(
             filename="last", save_top_k=0, save_weights_only=False),
         pl.callbacks.LearningRateMonitor("step"),
     ]
-    train_logger = pl_loggers.TensorBoardLogger(workdir, version='')
+    train_logger = pl_loggers.WandbLogger(
+        project=config.get("wandb_project", "jgnn"),
+        save_dir=workdir,
+        log_model="all",
+    )
+    train_logger.watch(model, log="all", log_freq=500)
     trainer = pl.Trainer(
         default_root_dir=workdir,
         max_epochs=config.num_epochs,
@@ -105,6 +110,7 @@ def train(
         callbacks=callbacks,
         logger=train_logger,
         enable_progress_bar=config.get("enable_progress_bar", True),
+        gradient_clip_val=config.get('gradient_clip_val')
     )
 
     # train the model

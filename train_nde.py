@@ -3,7 +3,6 @@ Training script for a normalizing flow-based neural density estimator (NDE),
 given a trained compressor model.
 """
 
-
 import os
 import pickle
 import sys
@@ -101,7 +100,14 @@ def train(
             filename="last", save_top_k=0, save_weights_only=False),
         pl.callbacks.LearningRateMonitor("step"),
     ]
-    train_logger = pl_loggers.TensorBoardLogger(workdir, version='')
+    # logger
+    train_logger = pl_loggers.WandbLogger(
+        project=config.get("wandb_project", "nde_training"),
+        save_dir=workdir,
+        log_model="all",
+    )
+    train_logger.watch(model, log="all", log_freq=500)
+
     trainer = pl.Trainer(
         default_root_dir=workdir,
         max_epochs=config.num_epochs,
