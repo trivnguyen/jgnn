@@ -8,10 +8,15 @@ import torch_geometric.transforms as T
 
 
 class GNNBlock(nn.Module):
-    def __init__(self,
-        input_size: int, output_size: int, layer_name: str,
-        layer_params: Dict[str, Any] = None, activation_fn: callable = nn.ReLU(),
-        layer_norm: bool = False, norm_first: bool = False
+    def __init__(
+        self,
+        input_size: int,
+        output_size: int,
+        layer_name: str,
+        layer_params: Dict[str, Any] = None,
+        activation_fn: callable = nn.ReLU,
+        layer_norm: bool = False,
+        norm_first: bool = False
     ):
         super().__init__()
         self.input_size = input_size
@@ -63,32 +68,56 @@ class GNNBlock(nn.Module):
             x = self.graph_layer(x, edge_index, edge_weight)
         else:
             x = self.graph_layer(x, edge_index)
+
+        # Apply activation (instantiate if it's a class)
+        activation = self.activation_fn() if isinstance(self.activation_fn, type) else self.activation_fn
+
         if self.norm_first and self.norm is not None:
             x = self.norm(x)
-            x = self.activation_fn(x)
+            x = activation(x)
         elif self.norm is not None:
-            x = self.activation_fn(x)
+            x = activation(x)
             x = self.norm(x)
         else:
-            x = self.activation_fn(x)
+            x = activation(x)
         return x
 
 
 class GNN(nn.Module):
-    """ Graph Neural Network model
+    """Graph Neural Network model.
 
-    Attributes
+    Parameters
     ----------
-    layers: nn.ModuleList
-        List of graph layers
-    activation_fn: callable
-        Activation function
+    input_size : int
+        Size of input features
+    hidden_sizes : List[int]
+        List of hidden layer sizes
+    projection_size : int, optional
+        Size of initial projection layer
+    graph_layer : str
+        Type of graph convolution layer
+    graph_layer_params : Dict[str, Any], optional
+        Parameters for the graph layer
+    activation_fn : callable
+        Activation function class (not instance), e.g., nn.ReLU
+    pooling : str
+        Type of global pooling ('mean', 'max', 'sum', or None)
+    layer_norm : bool
+        Whether to use layer normalization
+    norm_first : bool
+        Whether to apply normalization before activation
     """
     def __init__(
-        self, input_size: int, hidden_sizes: List[int], projection_size: int = None,
-        graph_layer: str = "ChebConv", graph_layer_params: Dict[str, Any] = None,
-        activation_fn: callable = nn.ReLU(), pooling: str = "mean",
-        layer_norm: bool = False, norm_first: bool = False
+        self,
+        input_size: int,
+        hidden_sizes: List[int],
+        projection_size: int = None,
+        graph_layer: str = "ChebConv",
+        graph_layer_params: Dict[str, Any] = None,
+        activation_fn: callable = nn.ReLU,
+        pooling: str = "mean",
+        layer_norm: bool = False,
+        norm_first: bool = False
     ):
         super().__init__()
         self.input_size = input_size
@@ -144,108 +173,3 @@ class GNN(nn.Module):
         else:
             return x
 
-
-class MLP(nn.Module):
-    """
-    MLP with a variable number of hidden layers.
-
-    Attributes
-    ----------
-    layers : nn.ModuleList
-        The layers of the MLP.
-    activation_fn : callable
-        The activation function to use.
-    """
-    def __init__(self, input_size, output_size, hidden_sizes=[512],
-                 activation_fn=nn.ReLU()):
-        """
-        Parameters
-        ----------
-        input_size : int
-            The size of the input
-        output_size : int
-            The number of classes
-        hidden_sizes : list of int, optional
-            The sizes of the hidden layers. Default: [512]
-        activation_fn : callable, optional
-            The activation function to use. Default: nn.ReLU()
-        """
-        super().__init__()
-        self.input_size = input_size
-        self.output_size = output_size
-        self.hidden_sizes = hidden_sizes
-        self.activation_fn = activation_fn
-
-        # Create a list of all layer sizes: input, hidden, and output
-        layer_sizes = [input_size] + hidden_sizes + [output_size]
-
-        # Create layers dynamically
-        self.layers = nn.ModuleList()
-        for i in range(len(layer_sizes) - 1):
-            in_dim = layer_sizes[i]
-            out_dim = layer_sizes[i + 1]
-            self.layers.append(nn.Linear(in_dim, out_dim))
-
-        # Store the activation function
-        self.activation_fn = activation_fn
-
-    def forward(self, x):
-        # Apply layers and activation function
-        for i, layer in enumerate(self.layers):
-            x = layer(x)
-            if i < len(self.layers) - 1:  # Apply activation function to all but last layer
-                x = self.activation_fn(x)
-        return x
-
-class MLPBatchNorm(nn.Module):
-    """
-    MLP with a variable number of hidden layers.
-
-    Attributes
-    ----------
-    layers : nn.ModuleList
-        The layers of the MLP.
-    activation_fn : callable
-        The activation function to use.
-    """
-    def __init__(self, input_size, output_size, hidden_sizes=[512],
-                 activation_fn=nn.ReLU(), batch_norm=False, dropout=0.0):
-        """
-        Parameters
-        ----------
-        input_size : int
-            The size of the input
-        output_size : int
-            The number of classes
-        hidden_sizes : list of int, optional
-            The sizes of the hidden layers. Default: [512]
-        activation_fn : callable, optional
-            The activation function to use. Default: nn.ReLU()
-        batch_norm: bool, optional
-            Whether to use batch normalization. Default: False
-        dropout: float, optional
-            The dropout rate. Default: 0.0
-        """
-        super().__init__()
-        self.input_size = input_size
-        self.output_size = output_size
-        self.hidden_sizes = hidden_sizes
-        self.activation_fn = activation_fn
-
-        # Create a list of all layer sizes: input, hidden, and output
-        layer_sizes = [input_size] + hidden_sizes + [output_size]
-
-        # Create layers dynamically
-        self.layers = nn.ModuleList()
-        for i in range(len(layer_sizes) - 1):
-            in_dim = layer_sizes[i]
-            out_dim = layer_sizes[i + 1]
-            self.layers.append(nn.Linear(in_dim, out_dim))
-            self.layers.append(activation_fn)
-            if batch_norm:
-                self.layers.append(nn.BatchNorm1d(out_dim))
-            self.layers.append(nn.Dropout(dropout))
-        self.layers = nn.Sequential(*self.layers)
-
-    def forward(self, x):
-        return self.layers(x)

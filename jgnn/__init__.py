@@ -1,15 +1,13 @@
 """Jeans GNN package for simulation-based inference."""
 
 from . import models
-from . import npe
-from . import flows_utils
-from . import models_utils
-from . import transforms_utils
+from . import transforms
+from .npe import NPE
+from .simple_npe import SimpleNPE
 
 __all__ = [
     'models',
-    'npe',
-    'flows_utils',
-    'models_utils',
-    'transforms_utils',
+    'transforms',
+    'NPE',
+    'SimpleNPE',
 ]
