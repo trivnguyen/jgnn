@@ -3,7 +3,7 @@
 from .layers import GNN, GNNBlock, MLP
 from .flows import build_flows
 from .gnn_embedding import GNNEmbedding
-from .utils import get_activation, configure_optimizers
+from .utils import get_activation, configure_optimizers, build_embedding_loss
 
 __all__ = [
     'GNN',
@@ -13,4 +13,5 @@ __all__ = [
     'build_flows',
     'get_activation',
     'configure_optimizers',
+    'build_embedding_loss',
 ]

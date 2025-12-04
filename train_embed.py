@@ -1,131 +1,252 @@
-""" Training script for the compressor model. Can also be used for training
-compressor + NDE jointly
-"""
-
+"""Training script for the Neural Posterior Estimation embedding model."""
 
 import os
-import pickle
 import sys
 import shutil
+from pathlib import Path
 
 import yaml
+import wandb
 import ml_collections
-import numpy as np
 import pytorch_lightning as pl
-import pytorch_lightning.loggers as pl_loggers
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    ModelCheckpoint,
+    LearningRateMonitor,
+)
 import torch
-from torch.utils.data import DataLoader, TensorDataset
-from absl import flags, logging
+from absl import flags
 from ml_collections import config_flags
 
 import datasets
-from jgnn import models, npe
+from jgnn.models.gnn_embedding import GNNEmbedding
+from jgnn.transforms import build_transformation
 
-logging.set_verbosity(logging.INFO)
 
-def train(
-    config: ml_collections.ConfigDict, workdir: str = "./logging/"
-):
-    # set up work directory
-    name = config.get("name", "default_compressor")
-    logging.info("Starting training run {} at {}".format(name, workdir))
+def setup_workdir(workdir: str, name: str, overwrite: bool, resume: bool) -> Path:
+    """Set up the working directory for training.
 
-    workdir = os.path.join(workdir, name)
-    checkpoint_path = None
+    Args:
+        workdir: Base working directory
+        name: Name of the training run
+        overwrite: Whether to overwrite existing directory
+        resume: Whether resuming from checkpoint
 
-    if config.get('checkpoint', None) is not None:
-        if os.path.isabs(config.checkpoint):
-            checkpoint_path = config.checkpoint
-        else:
-            checkpoint_path = os.path.join(
-                workdir, 'lightning_logs/checkpoints', config.checkpoint)
+    Returns:
+        Path object for the working directory
+    """
+    run_dir = Path(workdir) / name
 
-    if os.path.exists(workdir):
-        if config.overwrite:
-            shutil.rmtree(workdir)
-            os.makedirs(workdir, exist_ok=True)
-        elif checkpoint_path is None:
+    if run_dir.exists():
+        if overwrite and not resume:
+            shutil.rmtree(run_dir)
+            run_dir.mkdir(parents=True)
+        elif not resume:
             raise ValueError(
-                f"Workdir {workdir} already exists. Please set overwrite=True "
-                "to overwrite the existing directory, or specify a checkpoint to resume.")
+                f"Directory {run_dir} already exists. Set overwrite=True to overwrite "
+                "or provide a checkpoint to resume training."
+            )
     else:
-        os.makedirs(workdir, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+    return run_dir
 
 
-    # copy yaml file
-    os.makedirs(workdir, exist_ok=True)
-    config_dict = ml_collections.ConfigDict.to_dict(config)
-    with open(os.path.join(workdir, 'config.yaml'), 'w') as f:
-        yaml.dump(config_dict, f)
+def get_checkpoint_path(config: ml_collections.ConfigDict, workdir: Path) -> str | None:
+    """Resolve checkpoint path from config.
 
-    # read in the dataset and prepare the data loader for training
+    Args:
+        config: Configuration dictionary
+        workdir: Working directory path
+
+    Returns:
+        Resolved checkpoint path or None
+    """
+    if config.get('checkpoint') is None:
+        return None
+
+    ckpt = config.checkpoint
+    if os.path.isabs(ckpt):
+        return ckpt
+
+    return str(workdir / 'lightning_logs' / 'checkpoints' / ckpt)
+
+
+def prepare_data(config: ml_collections.ConfigDict):
+    """Load and prepare datasets with transformations.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        Tuple of (train_loader, val_loader, pre_transforms)
+    """
+    # Load datasets
     node_feats, graph_feats = datasets.read_datasets(
-        config.data_root, config.data_name, config.num_datasets,
-        config.is_directory, concat=True)
-    train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
-        node_feats, graph_feats, config.labels, train_batch_size=config.train_batch_size,
-        eval_batch_size=config.eval_batch_size, train_frac=config.train_frac,
-        num_workers=config.num_workers, seed=config.seed_data,
-        norm_version=config.get('norm_version', 'v2'),
+        config.data_root,
+        config.data_name,
+        config.num_datasets,
+        config.is_directory,
+        concat=True
     )
 
-    # create model
-    model = npe.NPE(
+    # Create dataloaders
+    train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
+        node_feats,
+        graph_feats,
+        config.labels,
+        train_batch_size=config.train_batch_size,
+        eval_batch_size=config.eval_batch_size,
+        train_frac=config.train_frac,
+        num_workers=config.num_workers,
+        seed=config.seed_data,
+    )
+
+    # Build pre-transforms if specified
+    pre_transforms = build_transformation(**config.pre_transforms)
+
+    return train_loader, val_loader, pre_transforms
+
+
+def create_model(config: ml_collections.ConfigDict, pre_transforms) -> GNNEmbedding:
+    """Create the GNN embedding model.
+
+    Args:
+        config: Configuration dictionary
+        pre_transforms: Pre-transformation pipeline
+
+    Returns:
+        GNNEmbedding model instance
+    """
+    return GNNEmbedding(
         input_size=config.model.input_size,
-        output_size=config.model.output_size,
-        featurizer_args=config.model.featurizer,
+        gnn_args=config.model.gnn,
         mlp_args=config.model.mlp,
-        flows_args=config.model.flows,
-        pre_transform_args=config.model.pre_transform,
+        loss_type=config.model.loss_type,
+        loss_args=config.model.get('loss_args', None),
+        conditional_mlp_args=config.model.get('conditional_mlp', None),
         optimizer_args=config.optimizer,
         scheduler_args=config.scheduler,
-        conditional_mlp_args=config.model.get('conditional_mlp', None),
-        norm_dict=norm_dict,
+        pre_transforms=pre_transforms,
     )
 
-    # create the trainer object
-    callbacks = [
-        pl.callbacks.EarlyStopping(
-            monitor=config.monitor, patience=config.patience, mode=config.mode,
-            verbose=True),
-        pl.callbacks.ModelCheckpoint(
-            filename="{epoch}-{step}-{val_loss:.4f}", monitor=config.monitor,
-            save_top_k=config.save_top_k, mode=config.mode,
-            save_weights_only=False),
-        pl.callbacks.ModelCheckpoint(
-            filename="last", save_top_k=0, save_weights_only=False),
-        pl.callbacks.LearningRateMonitor("step"),
+
+def create_callbacks(config: ml_collections.ConfigDict) -> list:
+    """Create PyTorch Lightning callbacks.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        List of callback instances
+    """
+    return [
+        EarlyStopping(
+            monitor=config.monitor,
+            patience=config.patience,
+            mode=config.mode,
+            verbose=True
+        ),
+        ModelCheckpoint(
+            filename="{epoch}-{step}-{val_loss:.4f}",
+            monitor=config.monitor,
+            save_top_k=config.save_top_k,
+            mode=config.mode,
+            save_weights_only=False
+        ),
+        ModelCheckpoint(
+            filename="last",
+            save_top_k=1,
+            save_weights_only=False,
+            save_last=True
+        ),
+        LearningRateMonitor(logging_interval="step"),
     ]
-    train_logger = pl_loggers.WandbLogger(
-        project=config.get("wandb_project", "jgnn"),
-        save_dir=workdir,
-        log_model="all",
+
+
+def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
+    """Train the GNN embedding model with wandb logging.
+
+    Args:
+        config: Configuration dictionary containing model and training parameters
+        workdir: Working directory for logging and checkpoints
+    """
+    # Setup
+    name = config.get("name", "embedding_training")
+    checkpoint_path = None
+    resume_training = config.get('checkpoint') is not None
+
+    # Setup working directory
+    run_dir = setup_workdir(
+        workdir,
+        name,
+        config.get('overwrite', False),
+        resume_training
     )
-    train_logger.watch(model, log="all", log_freq=500)
+
+    # Save config
+    config_dict = config.to_dict()
+    config_path = run_dir / 'config.yaml'
+    with open(config_path, 'w') as f:
+        yaml.dump(config_dict, f)
+
+    # Initialize wandb logger
+    wandb_logger = WandbLogger(
+        project=config.get("wandb_project", "jgnn"),
+        name=name,
+        save_dir=str(run_dir),
+        log_model=config.get("log_model", "all"),
+        config=config_dict,
+    )
+
+    # Prepare data
+    train_loader, val_loader, pre_transforms = prepare_data(config)
+
+    # Create model
+    model = create_model(config, pre_transforms)
+
+    # Get checkpoint path if resuming
+    if resume_training:
+        checkpoint_path = get_checkpoint_path(config, run_dir)
+        print(f"Resuming from checkpoint: {checkpoint_path}")
+
+    # Create callbacks
+    callbacks = create_callbacks(config)
+
+    # Create trainer
     trainer = pl.Trainer(
-        default_root_dir=workdir,
+        default_root_dir=str(run_dir),
         max_epochs=config.num_epochs,
         max_steps=config.num_steps,
         accelerator=config.accelerator,
         callbacks=callbacks,
-        logger=train_logger,
+        logger=wandb_logger,
         enable_progress_bar=config.get("enable_progress_bar", True),
-        gradient_clip_val=config.get('gradient_clip_val')
+        gradient_clip_val=config.get('gradient_clip_val', None),
     )
 
-    # train the model
-    logging.info("Training model...")
-    pl.seed_everything(config.seed_training)
+    # Set random seed
+    pl.seed_everything(config.seed_training, workers=True)
 
-    # Handle transfer learning: load checkpoint but reset optimizer if requested
-    if checkpoint_path is not None and config.get('reset_optimizer', False):
-        logging.info(f"Loading checkpoint from {checkpoint_path} with fresh optimizer")
+    # Train model
+    if checkpoint_path and config.get('reset_optimizer', False):
+        # Load weights only, reset optimizer state
+        print("Loading model weights with fresh optimizer state")
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
         model.load_state_dict(checkpoint['state_dict'])
         trainer.fit(model, train_loader, val_loader)
-    else:
-        logging.info(f"Loading checkpoint from {checkpoint_path} with full state")
+    elif checkpoint_path:
+        # Full checkpoint resume
+        print("Resuming training from full checkpoint")
         trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
+    else:
+        # Fresh training
+        print(f"Starting fresh training: {name}")
+        trainer.fit(model, train_loader, val_loader)
+
+    # Finalize wandb
+    wandb.finish()
 
 
 if __name__ == "__main__":
@@ -133,11 +254,8 @@ if __name__ == "__main__":
     config_flags.DEFINE_config_file(
         "config",
         None,
-        "File path to the training or sampling hyperparameter configuration.",
+        "File path to the training hyperparameter configuration.",
         lock_config=True,
     )
-    # Parse flags
     FLAGS(sys.argv)
-
-    # Start training run
-    train(config=FLAGS.config, workdir=FLAGS.config.workdir)
+    main(config=FLAGS.config, workdir=FLAGS.config.workdir)
