@@ -112,7 +112,6 @@ class GNNEmbedding(pl.LightningModule):
             batch=batch_dict['batch'],
             edge_attr=batch_dict['edge_attr'],
             edge_weight=batch_dict['edge_weight'],
-            cond=batch_dict['cond']
         )
 
         # MLP projection

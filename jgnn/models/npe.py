@@ -81,7 +81,7 @@ class NPE(pl.LightningModule):
         )
 
     def forward(self, batch):
-        return self.embedding_nn(batch)
+        return self.embedding_nn(self.embedding_nn._prepare_batch(batch))
 
     def _prepare_batch(self, batch):
         """Prepare batch data for training/validation."""
