@@ -27,35 +27,17 @@ from jgnn.models.gnn_embedding import GNNEmbedding
 from jgnn.transforms import build_transformation
 
 
-def setup_workdir(workdir: str, name: str, reset: bool, resume: bool) -> Path:
+def setup_workdir(workdir: str) -> Path:
     """Set up the working directory for training.
 
     Args:
         workdir: Base working directory
-        name: Name of the training run
-        reset:  If True, reset training run and overwrite local directory
-        resume: Whether resuming from checkpoint
 
     Returns:
         Path object for the working directory
     """
-    run_dir = Path(workdir) / name
-
-    if reset and resume:
-        raise ValueError("Cannot reset and resume training at the same time.")
-
-    if run_dir.exists():
-        if reset:
-            shutil.rmtree(run_dir)
-            run_dir.mkdir(parents=True)
-        else:
-            raise ValueError(
-                f"Directory {run_dir} already exists. Set reset=True to overwrite "
-                "or provide a checkpoint to resume training."
-            )
-    else:
-        run_dir.mkdir(parents=True, exist_ok=True)
-
+    run_dir = Path(workdir)
+    run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 
@@ -178,21 +160,14 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         workdir: Working directory for logging and checkpoints
     """
     # Setup
-    name = config.get("name", "embedding_training")
     checkpoint_path = None
     resume_training = config.get('checkpoint') is not None
 
-    print(f"[Setup] Training run: {name}")
     print(f"[Setup] Resume training: {resume_training}")
     print(f"[Setup] Working directory: {workdir}")
 
     # Setup working directory
-    run_dir = setup_workdir(
-        workdir,
-        name,
-        config.get('reset', False),
-        resume_training
-    )
+    run_dir = setup_workdir(workdir)
     print(f"[Setup] Run directory: {run_dir}")
 
     # Save config
@@ -208,11 +183,12 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
 
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn"),
-        name=name,
+        name=config.get("name"),
         save_dir=str(run_dir),
         log_model=config.get("log_model", "all"),
         config=config_dict,
         mode=wandb_mode,
+        resume="allow",
     )
 
     # Prepare data
@@ -224,6 +200,13 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     print("[Model] Creating GNN embedding model...")
     model = create_model(config, pre_transforms)
     print(f"[Model] Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Print trainable vs frozen parameters
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    print(f"[Model] Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"[Model] Trainable parameters: {trainable_params:,}")
+    print(f"[Model] Frozen parameters: {frozen_params:,}")
 
     # Get checkpoint path if resuming
     if resume_training:
@@ -267,7 +250,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
     else:
         # Fresh training
-        print(f"[Training] Starting fresh training: {name}")
+        print(f"[Training] Starting fresh training")
         trainer.fit(model, train_loader, val_loader)
 
     print("[Training] Training complete!")
