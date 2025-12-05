@@ -72,21 +72,21 @@ class GNNEmbedding(pl.LightningModule):
         # Create GNN featurizer
         gnn_config = dict(self.gnn_args)
         gnn_config['input_size'] = self.input_size
-        gnn_config['activation_fn'] = get_activation(
+        gnn_config['act'] = get_activation(
             gnn_config.pop('act_name'), gnn_config.pop('act_args'))
         self.gnn = GNN(**gnn_config)
 
         # Create MLP
         mlp_config = dict(self.mlp_args)
         mlp_config['input_size'] = self.gnn_args.hidden_sizes[-1]
-        mlp_config['activation_fn'] = get_activation(
+        mlp_config['act'] = get_activation(
             mlp_config.pop('act_name'), mlp_config.pop('act_args'))
         self.mlp = MLP(**mlp_config)
 
         # Create conditional MLP if specified
         if self.conditional_mlp_args is not None:
             cond_config = dict(self.conditional_mlp_args)
-            cond_config['activation_fn'] = get_activation(
+            cond_config['act'] = get_activation(
                 cond_config.pop('act_name'), cond_config.pop('act_args'))
             self.conditional_mlp = MLP(**cond_config)
         else:
@@ -170,7 +170,7 @@ class GNNEmbedding(pl.LightningModule):
             'x': batch.x,
             'edge_index': batch.edge_index,
             'batch': batch.batch,
-            'target': batch.y if hasattr(batch, 'y') else batch.theta,
+            'target': batch.theta,
             'edge_attr': batch.edge_attr if hasattr(batch, 'edge_attr') else None,
             'edge_weight': batch.edge_weight if hasattr(batch, 'edge_weight') else None,
             'cond': batch.cond if hasattr(batch, 'cond') else None,

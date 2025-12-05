@@ -148,14 +148,14 @@ def create_callbacks(config: ml_collections.ConfigDict) -> list:
     """
     return [
         EarlyStopping(
-            monitor='val_loss',
+            monitor='val/loss',
             mode='min',
             patience=config.patience,
             verbose=True
         ),
         ModelCheckpoint(
             filename="{epoch}-{step}",
-            monitor='val_loss',
+            monitor='val/loss',
             mode='min',
             save_top_k=config.save_top_k,
             save_weights_only=False

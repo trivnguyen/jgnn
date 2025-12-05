@@ -1,4 +1,5 @@
 
+from typing import Optional, List, Callable, Any
 import torch.nn as nn
 
 
@@ -13,7 +14,7 @@ class MLP(nn.Module):
         Size of the output features
     hidden_sizes : list of int
         Sizes of hidden layers
-    activation_fn : callable
+    act : callable
         Activation function class (not instance), e.g., nn.ReLU
     batch_norm : bool
         Whether to use batch normalization
@@ -24,8 +25,8 @@ class MLP(nn.Module):
         self,
         input_size: int,
         output_size: int,
-        hidden_sizes: list = [512],
-        activation_fn: callable = nn.ReLU,
+        hidden_sizes: List[int] = [512],
+        act: Callable = nn.ReLU(),
         batch_norm: bool = False,
         dropout: float = 0.0
     ):
@@ -33,7 +34,7 @@ class MLP(nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.hidden_sizes = hidden_sizes
-        self.activation_fn = activation_fn
+        self.act = act
         self.batch_norm = batch_norm
         self.dropout = dropout
 
@@ -46,7 +47,7 @@ class MLP(nn.Module):
             in_dim = layer_sizes[i]
             out_dim = layer_sizes[i + 1]
             layers.append(nn.Linear(in_dim, out_dim))
-            layers.append(activation_fn())
+            layers.append(act)
             if batch_norm:
                 layers.append(nn.BatchNorm1d(out_dim))
             if dropout > 0:

@@ -199,8 +199,8 @@ def build_embedding_loss(loss_type: str, loss_args: Optional[Dict[str, Any]] = N
             return mse_loss(embedding, target)
         return mse_loss_fn, None
 
-    elif loss_type == 'flow':
-        # Flow-based variational loss (e.g., variational information bottleneck)
+    elif loss_type == 'vmim':
+        # Flow-based Variational Mutual Information Maximization (VMIM)
         from .flows import build_flows
 
         # Extract flow configuration
@@ -219,7 +219,7 @@ def build_embedding_loss(loss_type: str, loss_args: Optional[Dict[str, Any]] = N
             )
 
         # Get activation function
-        activation_fn = get_activation(activation_name, activation_args)
+        activation_fn = get_activation(activation_name, activation_args, return_instance=False)
 
         # Build the flow
         flow = build_flows(
