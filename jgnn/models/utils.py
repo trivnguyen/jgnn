@@ -7,6 +7,7 @@ import math
 import torch
 import torch.nn as nn
 
+from .flows import build_flows
 
 def get_activation(
     act: str, act_args: Optional[Dict] = None, return_instance: bool = True
@@ -30,7 +31,7 @@ def get_activation(
 
     act_cls = mapping.get(key)
     if act_cls is None:
-        raise ValueError(f'Unknown activation function: {name}')
+        raise ValueError(f'Unknown activation function: {act}')
 
     # return instance or class/partial
     # zuko requires class, but torch nn modules usually want instances
@@ -201,9 +202,6 @@ def build_embedding_loss(loss_type: str, loss_args: Optional[Dict[str, Any]] = N
 
     elif loss_type == 'vmim':
         # Flow-based Variational Mutual Information Maximization (VMIM)
-        from .flows import build_flows
-
-        # Extract flow configuration
         features = loss_args.get('features')
         context_features = loss_args.get('context_features')
         num_transforms = loss_args.get('num_transforms', 4)

@@ -53,6 +53,7 @@ class GNNEmbedding(pl.LightningModule):
     ):
         super().__init__()
         self.input_size = input_size
+        self.output_size = None  # to be defined by mlp_args
         self.gnn_args = gnn_args
         self.mlp_args = mlp_args
         self.loss_type = loss_type
@@ -92,6 +93,8 @@ class GNNEmbedding(pl.LightningModule):
         else:
             self.conditional_mlp = None
 
+        self.output_size = self.mlp_args['output_size']
+
         # Initialize loss function
         # For flow loss, auto-set context_features to match MLP output if not specified
         loss_config = dict(self.loss_args)
@@ -100,33 +103,16 @@ class GNNEmbedding(pl.LightningModule):
 
         self.loss_fn, self.flow = build_embedding_loss(self.loss_type, loss_config)
 
-    def forward(self, x, edge_index, batch, edge_attr=None, edge_weight=None, cond=None):
-        """Forward pass through GNN -> MLP [+ CondMLP].
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Node features [num_nodes, input_size]
-        edge_index : torch.Tensor
-            Edge indices [2, num_edges]
-        batch : torch.Tensor
-            Batch assignment for nodes [num_nodes]
-        edge_attr : torch.Tensor, optional
-            Edge attributes [num_edges, edge_attr_dim]
-        edge_weight : torch.Tensor, optional
-            Edge weights [num_edges]
-        cond : torch.Tensor, optional
-            Conditional inputs [batch_size, cond_dim]
-
-        Returns
-        -------
-        torch.Tensor
-            Embedding [batch_size, output_size]
-        """
+    def forward(self, batch_dict):
+        """Forward pass through GNN -> MLP [+ CondMLP]."""
         # GNN featurizer
         embedding = self.gnn(
-            x, edge_index, batch=batch,
-            edge_attr=edge_attr, edge_weight=edge_weight
+            batch_dict['x'],
+            batch_dict['edge_index'],
+            batch=batch_dict['batch'],
+            edge_attr=batch_dict['edge_attr'],
+            edge_weight=batch_dict['edge_weight'],
+            cond=batch_dict['cond']
         )
 
         # MLP projection
@@ -134,7 +120,7 @@ class GNNEmbedding(pl.LightningModule):
 
         # Add conditional features if provided
         if self.conditional_mlp is not None:
-            cond_embedding = self.conditional_mlp(cond)
+            cond_embedding = self.conditional_mlp(batch_dict['cond'])
             embedding = embedding + cond_embedding
 
         return embedding
@@ -194,14 +180,7 @@ class GNNEmbedding(pl.LightningModule):
             Training loss
         """
         batch_dict = self._prepare_batch(batch)
-        embedding = self.forward(
-            batch_dict['x'],
-            batch_dict['edge_index'],
-            batch_dict['batch'],
-            edge_attr=batch_dict.get('edge_attr'),
-            edge_weight=batch_dict.get('edge_weight'),
-            cond=batch_dict.get('cond')
-        )
+        embedding = self.forward(batch_dict)
 
         # Compute loss
         loss = self.loss_fn(embedding, batch_dict['target'])
@@ -209,15 +188,9 @@ class GNNEmbedding(pl.LightningModule):
         # Log metrics
         # Use hierarchical naming for better organization in loggers like WandB/TensorBoard
         self.log(
-            'train/loss', loss,
-            on_step=True,           # Log at each training step
-            on_epoch=True,          # Also log epoch average
-            prog_bar=True,          # Show in progress bar
-            logger=True,            # Send to logger
-            batch_size=batch_dict['batch_size'],
-            sync_dist=True          # Sync across GPUs in distributed training
+            'train/loss', loss, on_step=True, on_epoch=True, prog_bar=True,
+            logger=True, batch_size=batch_dict['batch_size'], sync_dist=True
         )
-
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -236,14 +209,7 @@ class GNNEmbedding(pl.LightningModule):
             Validation loss
         """
         batch_dict = self._prepare_batch(batch)
-        embedding = self.forward(
-            batch_dict['x'],
-            batch_dict['edge_index'],
-            batch_dict['batch'],
-            edge_attr=batch_dict.get('edge_attr'),
-            edge_weight=batch_dict.get('edge_weight'),
-            cond=batch_dict.get('cond')
-        )
+        embedding = self.forward(batch_dict)
 
         # Compute loss
         loss = self.loss_fn(embedding, batch_dict['target'])
@@ -251,15 +217,9 @@ class GNNEmbedding(pl.LightningModule):
         # Log metrics
         # Validation metrics are typically only logged at epoch level
         self.log(
-            'val/loss', loss,
-            on_step=False,          # Don't log individual validation steps
-            on_epoch=True,          # Log epoch average
-            prog_bar=True,          # Show in progress bar
-            logger=True,            # Send to logger
-            batch_size=batch_dict['batch_size'],
-            sync_dist=True          # Sync across GPUs in distributed training
+            'val/loss', loss, on_step=False, on_epoch=True, prog_bar=True,
+            logger=True, batch_size=batch_dict['batch_size'], sync_dist=True
         )
-
         return loss
 
     def configure_optimizers(self):
