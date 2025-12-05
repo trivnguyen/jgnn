@@ -40,25 +40,86 @@ def get_activation(
     return partial(act_cls, **act_args) if act_args else act_cls
 
 class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
-    """Cosine annealing learning rate scheduler with warmup."""
+    """Cosine annealing learning rate scheduler with warmup.
 
-    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1, restart=False):
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        Wrapped optimizer
+    decay_steps : int
+        Initial number of steps for the first cosine cycle (T_0)
+    warmup_steps : int
+        Number of warmup steps at the beginning
+    eta_min : float, default=0
+        Minimum learning rate multiplier
+    last_epoch : int, default=-1
+        The index of last epoch
+    restart : bool, default=False
+        Whether to restart the cosine annealing after decay_steps
+    T_mult : float, default=1
+        Multiplicative factor for increasing cycle length after each restart.
+        After each restart, the next cycle length becomes: T_i = T_{i-1} * T_mult
+        Only used when restart=True. T_mult=1 gives constant cycle length.
+    """
+
+    def __init__(self, optimizer, decay_steps, warmup_steps, eta_min=0, last_epoch=-1, restart=False, T_mult=1):
+        self.T_0 = decay_steps  # Initial period
         self.decay_steps = decay_steps
         self.warmup_steps = warmup_steps
         self.eta_min = eta_min
         self.restart = restart
+        self.T_mult = T_mult
         super().__init__(optimizer, self.lr_lambda, last_epoch=last_epoch)
 
+    def _get_cycle_length(self, cycle_idx):
+        """Calculate the length of a given cycle."""
+        if self.T_mult == 1:
+            return self.T_0
+        return int(self.T_0 * (self.T_mult ** cycle_idx))
+
+    def _find_cycle(self, step):
+        """Find which cycle the current step belongs to and position within that cycle.
+
+        Returns
+        -------
+        tuple
+            (cycle_idx, step_in_cycle, cycle_length)
+        """
+        if not self.restart or self.T_mult == 1:
+            # Simple case: fixed cycle length or no restart
+            cycle_idx = step // self.T_0
+            step_in_cycle = step % self.T_0
+            return cycle_idx, step_in_cycle, self.T_0
+
+        # Variable cycle length case
+        cumulative_steps = 0
+        cycle_idx = 0
+
+        while True:
+            cycle_length = self._get_cycle_length(cycle_idx)
+            if cumulative_steps + cycle_length > step:
+                # Found the cycle
+                step_in_cycle = step - cumulative_steps
+                return cycle_idx, step_in_cycle, cycle_length
+            cumulative_steps += cycle_length
+            cycle_idx += 1
+
     def lr_lambda(self, step):
-        if step >= self.decay_steps:
-            if self.restart:
-                step = step % self.decay_steps
-            else:
-                step = self.decay_steps
-        if step < self.warmup_steps:
-            return float(step) / float(max(1, self.warmup_steps))
-        return self.eta_min + (
-            0.5 * (1 + math.cos(math.pi * (step - self.warmup_steps) / (self.decay_steps - self.warmup_steps))))
+        if not self.restart and step >= self.decay_steps:
+            # No restart: clamp to final step
+            step_in_cycle = self.decay_steps
+            cycle_length = self.decay_steps
+        else:
+            # Find current cycle and position
+            _, step_in_cycle, cycle_length = self._find_cycle(step)
+
+        # Warmup phase
+        if step_in_cycle < self.warmup_steps:
+            return float(step_in_cycle) / float(max(1, self.warmup_steps))
+
+        # Cosine annealing phase
+        progress = (step_in_cycle - self.warmup_steps) / (cycle_length - self.warmup_steps)
+        return self.eta_min + 0.5 * (1 + math.cos(math.pi * progress))
 
 
 def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
@@ -123,7 +184,8 @@ def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
             decay_steps=scheduler_args.decay_steps,
             warmup_steps=scheduler_args.warmup_steps,
             eta_min=scheduler_args.eta_min,
-            restart=scheduler_args.get('restart', False)
+            restart=scheduler_args.get('restart', False),
+            T_mult=scheduler_args.get('T_mult', 1)
         )
         # Step-based schedulers don't need a monitor metric
         monitor = None
