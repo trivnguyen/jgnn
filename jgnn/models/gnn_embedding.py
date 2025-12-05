@@ -163,6 +163,7 @@ class GNNEmbedding(pl.LightningModule):
             - 'batch_size': Batch size
         """
         batch = self.pre_transforms(batch) if self.pre_transforms else batch
+        batch = batch.to(self.device)
 
         # Default implementation for PyG Data objects
         batch_dict = {

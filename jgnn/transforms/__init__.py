@@ -53,7 +53,7 @@ def build_transformation(
     # Apply graph transformation, connect edges based on the specified graph type
     if graph_name.lower() not in ALL_GRAPHS:
         raise ValueError(f"Unknown graph name: {graph_name}. Supported graphs: {list(ALL_GRAPHS.keys())}")
-    transforms.append(ALL_GRAPHS[graph_name](**graph_args))
+    transforms.append(ALL_GRAPHS[graph_name.lower()](**graph_args))
 
     transforms = T.Compose(transforms)
     return transforms

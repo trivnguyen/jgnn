@@ -1,5 +1,5 @@
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Callable
 
 import torch
 import torch.nn as nn
@@ -14,7 +14,7 @@ class GNNBlock(nn.Module):
         output_size: int,
         layer_name: str,
         layer_params: Dict[str, Any] = None,
-        activation_fn: callable = nn.ReLU,
+        act: Callable = nn.ReLU(),
         layer_norm: bool = False,
         norm_first: bool = False
     ):
@@ -23,7 +23,7 @@ class GNNBlock(nn.Module):
         self.output_size = output_size
         self.layer_name = layer_name
         self.layer_params = layer_params or {}
-        self.activation_fn = activation_fn
+        self.act = act
         self.layer_norm = layer_norm
         self.norm_first = norm_first
         self.has_edge_attr = False
@@ -69,17 +69,10 @@ class GNNBlock(nn.Module):
         else:
             x = self.graph_layer(x, edge_index)
 
-        # Apply activation (instantiate if it's a class)
-        activation = self.activation_fn() if isinstance(self.activation_fn, type) else self.activation_fn
-
-        if self.norm_first and self.norm is not None:
-            x = self.norm(x)
-            x = activation(x)
-        elif self.norm is not None:
-            x = activation(x)
-            x = self.norm(x)
+        if self.norm is None:
+            x = self.act(x)
         else:
-            x = activation(x)
+            x = self.norm(self.act(x)) if self.norm_first else self.act(self.norm(x))
         return x
 
 
@@ -98,7 +91,7 @@ class GNN(nn.Module):
         Type of graph convolution layer
     graph_layer_params : Dict[str, Any], optional
         Parameters for the graph layer
-    activation_fn : callable
+    act : callable
         Activation function class (not instance), e.g., nn.ReLU
     pooling : str
         Type of global pooling ('mean', 'max', 'sum', or None)
@@ -114,7 +107,7 @@ class GNN(nn.Module):
         projection_size: int = None,
         graph_layer: str = "ChebConv",
         graph_layer_params: Dict[str, Any] = None,
-        activation_fn: callable = nn.ReLU,
+        act: Callable = nn.ReLU(),
         pooling: str = "mean",
         layer_norm: bool = False,
         norm_first: bool = False
@@ -125,7 +118,7 @@ class GNN(nn.Module):
         self.projection_size = projection_size
         self.graph_layer = graph_layer
         self.graph_layer_params = graph_layer_params or {}
-        self.activation_fn = activation_fn
+        self.act = act
         self.pooling = pooling
         self.layer_norm = layer_norm
         self.norm_first = norm_first
@@ -147,7 +140,7 @@ class GNN(nn.Module):
         for i in range(1, len(layer_sizes)):
             layer = GNNBlock(
                 layer_sizes[i-1], layer_sizes[i], self.graph_layer,
-                self.graph_layer_params, self.activation_fn,
+                self.graph_layer_params, self.act,
                 self.layer_norm, self.norm_first
             )
             self.layers.append(layer)

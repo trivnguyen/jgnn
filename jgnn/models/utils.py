@@ -8,7 +8,9 @@ import torch
 import torch.nn as nn
 
 
-def get_activation(act: str, act_args: Optional[Dict] = None) -> Callable:
+def get_activation(
+    act: str, act_args: Optional[Dict] = None, return_instance: bool = True
+) -> Callable[..., nn.Module]:
     """Get an activation callable (class or factory). If args is provided, returns a
     callable that will instantiate the activation with those kwargs (using functools.partial)."""
 
@@ -30,6 +32,10 @@ def get_activation(act: str, act_args: Optional[Dict] = None) -> Callable:
     if act_cls is None:
         raise ValueError(f'Unknown activation function: {name}')
 
+    # return instance or class/partial
+    # zuko requires class, but torch nn modules usually want instances
+    if return_instance:
+        return act_cls(**act_args) if act_args else act_cls()
     return partial(act_cls, **act_args) if act_args else act_cls
 
 class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):

@@ -5,6 +5,9 @@ import sys
 import shutil
 from pathlib import Path
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import yaml
 import wandb
 import ml_collections
@@ -24,13 +27,13 @@ from jgnn.models.gnn_embedding import GNNEmbedding
 from jgnn.transforms import build_transformation
 
 
-def setup_workdir(workdir: str, name: str, overwrite: bool, resume: bool) -> Path:
+def setup_workdir(workdir: str, name: str, reset: bool, resume: bool) -> Path:
     """Set up the working directory for training.
 
     Args:
         workdir: Base working directory
         name: Name of the training run
-        overwrite: Whether to overwrite existing directory
+        reset:  If True, reset training run and overwrite local directory
         resume: Whether resuming from checkpoint
 
     Returns:
@@ -38,13 +41,16 @@ def setup_workdir(workdir: str, name: str, overwrite: bool, resume: bool) -> Pat
     """
     run_dir = Path(workdir) / name
 
+    if reset and resume:
+        raise ValueError("Cannot reset and resume training at the same time.")
+
     if run_dir.exists():
-        if overwrite and not resume:
+        if reset:
             shutil.rmtree(run_dir)
             run_dir.mkdir(parents=True)
-        elif not resume:
+        else:
             raise ValueError(
-                f"Directory {run_dir} already exists. Set overwrite=True to overwrite "
+                f"Directory {run_dir} already exists. Set reset=True to overwrite "
                 "or provide a checkpoint to resume training."
             )
     else:
@@ -87,7 +93,6 @@ def prepare_data(config: ml_collections.ConfigDict):
         config.data_root,
         config.data_name,
         config.num_datasets,
-        config.is_directory,
         concat=True
     )
 
@@ -143,16 +148,16 @@ def create_callbacks(config: ml_collections.ConfigDict) -> list:
     """
     return [
         EarlyStopping(
-            monitor=config.monitor,
+            monitor='val_loss',
+            mode='min',
             patience=config.patience,
-            mode=config.mode,
             verbose=True
         ),
         ModelCheckpoint(
-            filename="{epoch}-{step}-{val_loss:.4f}",
-            monitor=config.monitor,
+            filename="{epoch}-{step}",
+            monitor='val_loss',
+            mode='min',
             save_top_k=config.save_top_k,
-            mode=config.mode,
             save_weights_only=False
         ),
         ModelCheckpoint(
@@ -177,44 +182,63 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     checkpoint_path = None
     resume_training = config.get('checkpoint') is not None
 
+    print(f"[Setup] Training run: {name}")
+    print(f"[Setup] Resume training: {resume_training}")
+    print(f"[Setup] Working directory: {workdir}")
+
     # Setup working directory
     run_dir = setup_workdir(
         workdir,
         name,
-        config.get('overwrite', False),
+        config.get('reset', False),
         resume_training
     )
+    print(f"[Setup] Run directory: {run_dir}")
 
     # Save config
     config_dict = config.to_dict()
     config_path = run_dir / 'config.yaml'
     with open(config_path, 'w') as f:
         yaml.dump(config_dict, f)
+    print(f"[Setup] Config saved to: {config_path}")
 
     # Initialize wandb logger
+    wandb_mode = 'disabled' if config.get('debug', False) else 'online'
+    print(f"[WandB] Mode: {wandb_mode}")
+
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn"),
         name=name,
         save_dir=str(run_dir),
         log_model=config.get("log_model", "all"),
         config=config_dict,
+        mode=wandb_mode,
     )
 
     # Prepare data
+    print("[Data] Loading datasets...")
     train_loader, val_loader, pre_transforms = prepare_data(config)
+    print(f"[Data] Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
 
     # Create model
+    print("[Model] Creating GNN embedding model...")
     model = create_model(config, pre_transforms)
+    print(f"[Model] Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Get checkpoint path if resuming
     if resume_training:
         checkpoint_path = get_checkpoint_path(config, run_dir)
-        print(f"Resuming from checkpoint: {checkpoint_path}")
+        print(f"[Checkpoint] Resuming from: {checkpoint_path}")
+        print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
     # Create callbacks
     callbacks = create_callbacks(config)
+    print(f"[Callbacks] Created {len(callbacks)} callbacks")
 
     # Create trainer
+    print(f"[Trainer] Max epochs: {config.num_epochs}, Max steps: {config.num_steps}")
+    print(f"[Trainer] Accelerator: {config.accelerator}")
+
     trainer = pl.Trainer(
         default_root_dir=str(run_dir),
         max_epochs=config.num_epochs,
@@ -226,28 +250,31 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         gradient_clip_val=config.get('gradient_clip_val', None),
     )
 
-    # Set random seed
+    # Set random seed for training
     pl.seed_everything(config.seed_training, workers=True)
+    print(f"[Seed] Training seed set to: {config.seed_training}")
 
     # Train model
     if checkpoint_path and config.get('reset_optimizer', False):
         # Load weights only, reset optimizer state
-        print("Loading model weights with fresh optimizer state")
+        print("[Training] Loading model weights with fresh optimizer state")
         checkpoint = torch.load(checkpoint_path, map_location='cpu')
         model.load_state_dict(checkpoint['state_dict'])
         trainer.fit(model, train_loader, val_loader)
     elif checkpoint_path:
         # Full checkpoint resume
-        print("Resuming training from full checkpoint")
+        print("[Training] Resuming training from full checkpoint")
         trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
     else:
         # Fresh training
-        print(f"Starting fresh training: {name}")
+        print(f"[Training] Starting fresh training: {name}")
         trainer.fit(model, train_loader, val_loader)
+
+    print("[Training] Training complete!")
 
     # Finalize wandb
     wandb.finish()
-
+    print("[WandB] Finished")
 
 if __name__ == "__main__":
     FLAGS = flags.FLAGS
