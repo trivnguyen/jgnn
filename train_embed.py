@@ -23,7 +23,7 @@ from absl import flags
 from ml_collections import config_flags
 
 import datasets
-from jgnn.models import GNNEmbedding
+from jgnn.models import GNNEmbedding, TransformerEmbedding
 from jgnn.transforms import build_transformation
 
 
@@ -97,7 +97,7 @@ def create_model(
     config: ml_collections.ConfigDict,
     pre_transforms,
     norm_dict
-) -> GNNEmbedding:
+):
     """Create the GNN embedding model.
 
     Args:
@@ -106,20 +106,37 @@ def create_model(
         norm_dict: Normalization dictionary to pass to the model
 
     Returns:
-        GNNEmbedding model instance
+        Embedding model instance
     """
-    return GNNEmbedding(
-        input_size=config.model.input_size,
-        gnn_args=config.model.gnn,
-        mlp_args=config.model.mlp,
-        loss_type=config.model.loss_type,
-        loss_args=config.model.get('loss_args', None),
-        conditional_mlp_args=config.model.get('conditional_mlp', None),
-        optimizer_args=config.optimizer,
-        scheduler_args=config.scheduler,
-        pre_transforms=pre_transforms,
-        norm_dict=norm_dict,
-    )
+    if config.model.type == 'gnn':
+        print("[Model] Creating GNN Embedding model...")
+        return GNNEmbedding(
+            input_size=config.model.input_size,
+            gnn_args=config.model.gnn,
+            mlp_args=config.model.mlp,
+            loss_type=config.model.loss_type,
+            loss_args=config.model.get('loss_args', None),
+            conditional_mlp_args=config.model.get('conditional_mlp', None),
+            optimizer_args=config.optimizer,
+            scheduler_args=config.scheduler,
+            pre_transforms=pre_transforms,
+            norm_dict=norm_dict,
+        )
+    elif config.model.type == 'transformer':
+        print("[Model] Creating Transformer Embedding model...")
+        return TransformerEmbedding(
+            input_size=config.model.input_size,
+            transformer_args=config.model.transformer,
+            loss_type=config.model.loss_type,
+            loss_args=config.model.get('loss_args', None),
+            mlp_args=config.model.get('mlp', None),
+            optimizer_args=config.optimizer,
+            scheduler_args=config.scheduler,
+            pre_transforms=pre_transforms,
+            norm_dict=norm_dict,
+        )
+    else:
+        raise ValueError(f"Unknown model type: {config.model.type}")
 
 
 def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogger) -> list:
@@ -191,7 +208,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         project=config.get("wandb_project", "jgnn"),
         name=config.get("name"),
         save_dir=str(run_dir),
-        log_model=config.get("log_model", "all"),
+        log_model="all",
         config=config_dict,
         mode=wandb_mode,
         resume="allow",

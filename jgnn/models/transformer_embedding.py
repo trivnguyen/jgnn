@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from .layers import Transformer
-from .utils import configure_optimizers
+from .layers import Transformer, MLP
+from .utils import get_activation, configure_optimizers
 from .utils import build_embedding_loss
 
 
@@ -17,15 +17,21 @@ class TransformerEmbedding(pl.LightningModule):
     This model converts PyTorch Geometric graph batches to padded sequences,
     processes them through a transformer, and produces embeddings.
 
+    This model consists of:
+    1. Transformer that processes sequential/set inputs (with pooling)
+    2. MLP that projects transformer outputs to embedding space
+
     The model expects PyTorch Geometric Data batches and automatically converts
     them to padded sequences for the transformer.
 
     Parameters
     ----------
     input_size : int
-        Size of input node/element features (also the output embedding size)
+        Size of input node/element features
     transformer_args : Dict[str, Any]
         Configuration for Transformer (d_model, n_layers, n_heads, pooling, etc.)
+    mlp_args : Dict[str, Any]
+        Configuration for MLP (hidden_sizes, output_size, etc.)
     loss_type : str
         Type of loss function ('mse' or 'flow')
     loss_args : Dict[str, Any], optional
@@ -47,6 +53,7 @@ class TransformerEmbedding(pl.LightningModule):
         transformer_args: Dict[str, Any],
         loss_type: str = 'mse',
         loss_args: Optional[Dict[str, Any]] = None,
+        mlp_args: Dict[str, Any] = None,
         optimizer_args: Optional[Dict[str, Any]] = None,
         scheduler_args: Optional[Dict[str, Any]] = None,
         pre_transforms=None,
@@ -54,7 +61,9 @@ class TransformerEmbedding(pl.LightningModule):
     ):
         super().__init__()
         self.input_size = input_size
+        self.output_size = None
         self.transformer_args = transformer_args
+        self.mlp_args = mlp_args
         self.loss_type = loss_type
         self.loss_args = loss_args or {}
         self.optimizer_args = optimizer_args or {}
@@ -66,14 +75,27 @@ class TransformerEmbedding(pl.LightningModule):
         self._setup_model()
 
     def _setup_model(self):
-        """Initialize Transformer and loss function."""
+        """Initialize Transformer, MLP, and loss function."""
         # Create Transformer
         self.transformer = Transformer(**self.transformer_args)
+
+        # Create MLP
+        if self.mlp_args is not None:
+            mlp_config = dict(self.mlp_args)
+            mlp_config['input_size'] = self.input_size
+            mlp_config['act'] = get_activation(
+                mlp_config.pop('act_name'), mlp_config.pop('act_args')
+            )
+            self.mlp = MLP(**mlp_config)
+            self.output_size = self.mlp_args['output_size']
+        else:
+            self.mlp = None
+            self.output_size = self.transformer_args.get('d_model', self.input_size)
 
         # Initialize loss function
         loss_config = dict(self.loss_args)
         if self.loss_type == 'flow' and 'context_features' not in loss_config:
-            loss_config['context_features'] = self.input_size
+            loss_config['context_features'] = self.mlp_args['output_size']
 
         self.loss_fn, self.flow = build_embedding_loss(self.loss_type, loss_config)
 
@@ -124,7 +146,7 @@ class TransformerEmbedding(pl.LightningModule):
         return x_padded, mask, num_nodes_per_graph
 
     def forward(self, batch_dict):
-        """Forward pass through Transformer.
+        """Forward pass through Transformer -> MLP.
 
         Parameters
         ----------
@@ -138,7 +160,7 @@ class TransformerEmbedding(pl.LightningModule):
         Returns
         -------
         torch.Tensor
-            Embedding of shape (batch_size, input_size)
+            Embedding of shape (batch_size, output_size)
         """
         # Transformer forward pass (includes pooling if specified in transformer_args)
         embedding = self.transformer(
@@ -147,6 +169,10 @@ class TransformerEmbedding(pl.LightningModule):
             mask=batch_dict['mask'],
             pos_enc=batch_dict.get('pos_enc', None)
         )
+
+        # MLP projection
+        if self.mlp is not None:
+            embedding = self.mlp(embedding)
 
         return embedding
 

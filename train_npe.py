@@ -23,7 +23,7 @@ from absl import flags
 from ml_collections import config_flags
 
 import datasets
-from jgnn.models import NPE, GNNEmbedding
+from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
 from jgnn.transforms import build_transformation
 
 
@@ -80,7 +80,13 @@ def load_embedding_network(checkpoint_path: str, freeze: bool = False):
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
     # Load the embedding model
-    embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
+    if 'model_type' in checkpoint['hyper_parameters'] \
+        and checkpoint['hyper_parameters']['model_type'] == 'transformer':
+        print(f"[Embedding] Detected TransformerEmbedding model type")
+        embedding_nn = TransformerEmbedding.load_from_checkpoint(checkpoint_path)
+    else:
+        print(f"[Embedding] Detected GNNEmbedding model type")
+        embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
 
     # Extract norm_dict if available in the hyperparameters
     norm_dict = None
@@ -157,27 +163,43 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
 
 
 def create_embedding_network(config: ml_collections.ConfigDict):
-    """Create a new GNN embedding network.
+    """Create a new embedding network.
 
     Args:
         config: Configuration dictionary
 
     Returns:
-        GNNEmbedding model instance
+        Embedding network instance
     """
-    return GNNEmbedding(
-        input_size=config.model.input_size,
-        gnn_args=config.model.embedding.gnn,
-        mlp_args=config.model.embedding.mlp,
-        loss_type=config.model.embedding.get('loss_type', 'mse'),
-        loss_args=config.model.embedding.get('loss_args', None),
-        conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
-        # NPE handles optimizer, scheduler, and pre_transforms
-        optimizer_args=None,
-        scheduler_args=None,
-        pre_transforms=None,
-    )
-
+    model_type = config.model.embedding.get('type', 'gnn')
+    if model_type == 'gnn':
+        print("[Model] Creating GNN Embedding model...")
+        return GNNEmbedding(
+            input_size=config.model.input_size,
+            gnn_args=config.model.embedding.gnn,
+            mlp_args=config.model.embedding.mlp,
+            loss_type=config.model.embedding.get('loss_type', 'mse'),
+            loss_args=config.model.embedding.get('loss_args', None),
+            conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
+            # NPE handles optimizer, scheduler, and pre_transforms
+            optimizer_args=None,
+            scheduler_args=None,
+            pre_transforms=None,
+        )
+    elif model_type == 'transformer':
+        print("[Model] Creating Transformer Embedding model...")
+        return TransformerEmbedding(
+            input_size=config.model.input_size,
+            transformer_args=config.model.embedding.transformer,
+            loss_type=config.model.embedding.get('loss_type', 'mse'),
+            loss_args=config.model.embedding.get('loss_args', None),
+            mlp_args=config.model.embedding.get('mlp', None),
+            optimizer_args=None,
+            scheduler_args=None,
+            pre_transforms=None,
+        )
+    else:
+        raise ValueError(f"Unsupported embedding model type: {config.model.type}")
 
 def create_model(
     config: ml_collections.ConfigDict,
@@ -295,7 +317,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
         save_dir=str(run_dir),
-        log_model=config.get("log_model", "all"),
+        log_model="all",
         config=config_dict,
         mode=wandb_mode,
         resume="allow",

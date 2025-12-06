@@ -14,10 +14,11 @@ ALL_GRAPHS = {
 }
 
 def build_transformation(
-    graph_name: str,
+    apply_graph: bool = True,
     apply_projection: bool = False,
     apply_selection: bool = False,
     apply_uncertainty: bool = False,
+    graph_name: str = 'KNN',
     graph_args: dict = None,
     projection_args: dict = None,
     selection_args: dict = None,
@@ -52,9 +53,11 @@ def build_transformation(
         transforms.append(Normalize(norm_dict['x_loc'], norm_dict['x_scale']))
 
     # Apply graph transformation, connect edges based on the specified graph type
-    if graph_name.lower() not in ALL_GRAPHS:
-        raise ValueError(f"Unknown graph name: {graph_name}. Supported graphs: {list(ALL_GRAPHS.keys())}")
-    transforms.append(ALL_GRAPHS[graph_name.lower()](**graph_args))
+    # set to False for no graph construction (e.g., for Transformer models)
+    if apply_graph:
+        if graph_name.lower() not in ALL_GRAPHS:
+            raise ValueError(f"Unknown graph name: {graph_name}. Supported graphs: {list(ALL_GRAPHS.keys())}")
+        transforms.append(ALL_GRAPHS[graph_name.lower()](**graph_args))
 
     transforms = T.Compose(transforms)
     return transforms

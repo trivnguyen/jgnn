@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 
 from .layers import GNN, MLP
 from .utils import get_activation, configure_optimizers
+from .utils import build_embedding_loss
 
 
 class GNNEmbedding(pl.LightningModule):
@@ -70,7 +71,6 @@ class GNNEmbedding(pl.LightningModule):
 
     def _setup_model(self):
         """Initialize GNN, MLP, optional conditional MLP, and loss function."""
-        from .utils import build_embedding_loss
 
         # Create GNN featurizer
         gnn_config = dict(self.gnn_args)
