@@ -149,7 +149,7 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
     Returns:
         List of callback instances
     """
-    return [
+    callbacks = [
         EarlyStopping(
             monitor='val/loss',
             mode='min',
@@ -157,23 +157,30 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
             verbose=True
         ),
         ModelCheckpoint(
-            filename="{epoch}-{step}",
+            filename="{epoch}-{step}-{val/loss:.4f}",
             monitor='val/loss',
             mode='min',
-            save_top_k=config.save_top_k,
+            save_top_k=3,  # saves last 3 best checkpoints
+            save_weights_only=False,
+            auto_insert_metric_name=False,
+        ),
+        ModelCheckpoint(
+            filename="best",
+            monitor='val/loss',
+            mode='min',
+            save_top_k=1,  # saves only the best checkpoint
             save_weights_only=False,
             auto_insert_metric_name=False,
         ),
         ModelCheckpoint(
             filename="last",
-            save_top_k=1,
             save_weights_only=False,
             save_last=True,
             auto_insert_metric_name=False,
         ),
         LearningRateMonitor(logging_interval="step"),
     ]
-
+    return callbacks
 
 def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     """Train the GNN embedding model with wandb logging.

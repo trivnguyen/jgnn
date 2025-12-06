@@ -76,21 +76,21 @@ class GNNEmbedding(pl.LightningModule):
         gnn_config = dict(self.gnn_args)
         gnn_config['input_size'] = self.input_size
         gnn_config['act'] = get_activation(
-            gnn_config.pop('act_name'), gnn_config.pop('act_args'))
+            gnn_config.pop('act_name'), gnn_config.pop('act_args', {}))
         self.gnn = GNN(**gnn_config)
 
         # Create MLP
         mlp_config = dict(self.mlp_args)
         mlp_config['input_size'] = self.gnn_args.hidden_sizes[-1]
         mlp_config['act'] = get_activation(
-            mlp_config.pop('act_name'), mlp_config.pop('act_args'))
+            mlp_config.pop('act_name'), mlp_config.pop('act_args', {}))
         self.mlp = MLP(**mlp_config)
 
         # Create conditional MLP if specified
         if self.conditional_mlp_args is not None:
             cond_config = dict(self.conditional_mlp_args)
             cond_config['act'] = get_activation(
-                cond_config.pop('act_name'), cond_config.pop('act_args'))
+                cond_config.pop('act_name'), cond_config.pop('act_args', {}))
             self.conditional_mlp = MLP(**cond_config)
         else:
             self.conditional_mlp = None

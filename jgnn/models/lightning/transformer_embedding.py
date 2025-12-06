@@ -84,7 +84,7 @@ class TransformerEmbedding(pl.LightningModule):
             mlp_config = dict(self.mlp_args)
             mlp_config['input_size'] = self.input_size
             mlp_config['act'] = get_activation(
-                mlp_config.pop('act_name'), mlp_config.pop('act_args')
+                mlp_config.pop('act_name'), mlp_config.pop('act_args', {})
             )
             self.mlp = MLP(**mlp_config)
             self.output_size = self.mlp_args['output_size']
