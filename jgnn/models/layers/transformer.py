@@ -103,6 +103,9 @@ class Transformer(nn.Module):
         Whether to concatenate conditioning to the input
     use_pos_enc : bool
         Whether to use positional encoding
+    pooling : str, optional
+        Type of pooling to aggregate sequence ('mean', 'max', 'sum', 'cls', or None)
+        If None, returns full sequence
     """
     def __init__(
         self,
@@ -114,7 +117,8 @@ class Transformer(nn.Module):
         d_pos: Optional[int] = None,
         d_cond: Optional[int] = None,
         concat_conditioning: bool = False,
-        use_pos_enc: bool = False
+        use_pos_enc: bool = False,
+        pooling: Optional[str] = None
     ):
         super().__init__()
         self.d_in = d_in
@@ -126,6 +130,7 @@ class Transformer(nn.Module):
         self.n_heads = n_heads
         self.use_pos_enc = use_pos_enc
         self.concat_conditioning = concat_conditioning
+        self.pooling = pooling
 
         self._setup_model()
 
@@ -163,6 +168,51 @@ class Transformer(nn.Module):
         self.unembed = nn.Linear(self.d_model, self.d_in)
         torch.nn.init.zeros_(self.unembed.weight)
 
+    def _pool_sequence(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Pool sequence representations to single vector.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Shape (batch_size, seq_len, features)
+        mask : torch.Tensor, optional
+            Shape (batch_size, seq_len), True for padding positions
+
+        Returns
+        -------
+        torch.Tensor
+            Shape (batch_size, features) if pooling is applied, else (batch_size, seq_len, features)
+        """
+        if self.pooling is None:
+            return x
+        elif self.pooling == 'mean':
+            # Masked mean pooling
+            if mask is not None:
+                x_masked = x.masked_fill(mask.unsqueeze(-1), 0)
+                lengths = (~mask).sum(dim=1, keepdim=True).clamp(min=1)
+                return x_masked.sum(dim=1) / lengths.float()
+            else:
+                return x.mean(dim=1)
+        elif self.pooling == 'max':
+            # Masked max pooling
+            if mask is not None:
+                x_masked = x.masked_fill(mask.unsqueeze(-1), float('-inf'))
+                return x_masked.max(dim=1)[0]
+            else:
+                return x.max(dim=1)[0]
+        elif self.pooling == 'sum':
+            # Masked sum pooling
+            if mask is not None:
+                x_masked = x.masked_fill(mask.unsqueeze(-1), 0)
+                return x_masked.sum(dim=1)
+            else:
+                return x.sum(dim=1)
+        elif self.pooling == 'cls':
+            # Use first token (assumes CLS token)
+            return x[:, 0]
+        else:
+            raise ValueError(f"Unknown pooling method: {self.pooling}")
+
     def forward(
         self,
         x: torch.Tensor,
@@ -199,5 +249,8 @@ class Transformer(nn.Module):
 
         # Output projection
         x = self.unembed(x)
+
+        # Apply pooling if specified
+        x = self._pool_sequence(x, mask)
 
         return x

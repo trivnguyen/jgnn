@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 
 from .layers import Transformer
 from .utils import configure_optimizers
+from .utils import build_embedding_loss
 
 
 class TransformerEmbedding(pl.LightningModule):
@@ -23,24 +24,8 @@ class TransformerEmbedding(pl.LightningModule):
     ----------
     input_size : int
         Size of input node/element features (also the output embedding size)
-    d_model : int
-        Dimension of the model embedding space
-    d_mlp : int
-        Dimension of the feed-forward MLP in transformer blocks
-    n_layers : int
-        Number of transformer layers
-    n_heads : int
-        Number of attention heads
-    d_pos : int, optional
-        Dimension of positional encoding features
-    d_cond : int, optional
-        Dimension of conditioning features
-    concat_conditioning : bool
-        Whether to concatenate conditioning to the input
-    use_pos_enc : bool
-        Whether to use positional encoding
-    pooling : str
-        Type of pooling to aggregate sequence ('mean', 'max', 'sum', or 'cls')
+    transformer_args : Dict[str, Any]
+        Configuration for Transformer (d_model, n_layers, n_heads, pooling, etc.)
     loss_type : str
         Type of loss function ('mse' or 'flow')
     loss_args : Dict[str, Any], optional
@@ -59,15 +44,7 @@ class TransformerEmbedding(pl.LightningModule):
     def __init__(
         self,
         input_size: int,
-        d_model: int = 128,
-        d_mlp: int = 512,
-        n_layers: int = 4,
-        n_heads: int = 4,
-        d_pos: Optional[int] = None,
-        d_cond: Optional[int] = None,
-        concat_conditioning: bool = False,
-        use_pos_enc: bool = False,
-        pooling: str = 'mean',
+        transformer_args: Dict[str, Any],
         loss_type: str = 'mse',
         loss_args: Optional[Dict[str, Any]] = None,
         optimizer_args: Optional[Dict[str, Any]] = None,
@@ -77,15 +54,7 @@ class TransformerEmbedding(pl.LightningModule):
     ):
         super().__init__()
         self.input_size = input_size
-        self.d_model = d_model
-        self.d_mlp = d_mlp
-        self.n_layers = n_layers
-        self.n_heads = n_heads
-        self.d_pos = d_pos
-        self.d_cond = d_cond
-        self.concat_conditioning = concat_conditioning
-        self.use_pos_enc = use_pos_enc
-        self.pooling = pooling
+        self.transformer_args = transformer_args
         self.loss_type = loss_type
         self.loss_args = loss_args or {}
         self.optimizer_args = optimizer_args or {}
@@ -98,20 +67,8 @@ class TransformerEmbedding(pl.LightningModule):
 
     def _setup_model(self):
         """Initialize Transformer and loss function."""
-        from .utils import build_embedding_loss
-
         # Create Transformer
-        self.transformer = Transformer(
-            d_in=self.input_size,
-            d_model=self.d_model,
-            d_mlp=self.d_mlp,
-            n_layers=self.n_layers,
-            n_heads=self.n_heads,
-            d_pos=self.d_pos,
-            d_cond=self.d_cond,
-            concat_conditioning=self.concat_conditioning,
-            use_pos_enc=self.use_pos_enc
-        )
+        self.transformer = Transformer(**self.transformer_args)
 
         # Initialize loss function
         loss_config = dict(self.loss_args)
@@ -161,47 +118,13 @@ class TransformerEmbedding(pl.LightningModule):
         for graph_idx in range(num_graphs):
             n_nodes = num_nodes_per_graph[graph_idx].item()
             x_padded[graph_idx, :n_nodes] = batch.x[node_idx:node_idx + n_nodes]
-            mask[graph_idx, :n_nodes] = False  # False = valid data for torch
+            mask[graph_idx, :n_nodes] = False
             node_idx += n_nodes
 
         return x_padded, mask, num_nodes_per_graph
 
-    def _pool_sequence(self, x, mask):
-        """Pool sequence representations to single vector per graph.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Shape (batch_size, seq_len, features)
-        mask : torch.Tensor
-            Shape (batch_size, seq_len), True for padding positions
-
-        Returns
-        -------
-        torch.Tensor
-            Shape (batch_size, features)
-        """
-        if self.pooling == 'mean':
-            # Masked mean pooling
-            x_masked = x.masked_fill(mask.unsqueeze(-1), 0)
-            lengths = (~mask).sum(dim=1, keepdim=True).clamp(min=1)
-            return x_masked.sum(dim=1) / lengths.float()
-        elif self.pooling == 'max':
-            # Masked max pooling
-            x_masked = x.masked_fill(mask.unsqueeze(-1), float('-inf'))
-            return x_masked.max(dim=1)[0]
-        elif self.pooling == 'sum':
-            # Masked sum pooling
-            x_masked = x.masked_fill(mask.unsqueeze(-1), 0)
-            return x_masked.sum(dim=1)
-        elif self.pooling == 'cls':
-            # Use first token (assumes CLS token)
-            return x[:, 0]
-        else:
-            raise ValueError(f"Unknown pooling method: {self.pooling}")
-
     def forward(self, batch_dict):
-        """Forward pass through Transformer -> Pooling.
+        """Forward pass through Transformer.
 
         Parameters
         ----------
@@ -217,16 +140,13 @@ class TransformerEmbedding(pl.LightningModule):
         torch.Tensor
             Embedding of shape (batch_size, input_size)
         """
-        # Transformer forward pass
-        x = self.transformer(
+        # Transformer forward pass (includes pooling if specified in transformer_args)
+        embedding = self.transformer(
             batch_dict['x'],
             conditioning=batch_dict.get('cond', None),
             mask=batch_dict['mask'],
             pos_enc=batch_dict.get('pos_enc', None)
         )
-
-        # Pool sequence to single vector per graph
-        embedding = self._pool_sequence(x, batch_dict['mask'])
 
         return embedding
 
