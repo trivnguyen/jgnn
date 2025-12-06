@@ -81,7 +81,12 @@ class NPE(pl.LightningModule):
         )
 
     def forward(self, batch):
+        """ Forward pass through the embedding network. """
         return self.embedding_nn(self.embedding_nn._prepare_batch(batch))
+
+    def log_prob(self, embedding, theta):
+        """ Evaluate the flow log probability. """
+        return self.flows(embedding).log_prob(theta)
 
     def _prepare_batch(self, batch):
         """Prepare batch data for training/validation."""
