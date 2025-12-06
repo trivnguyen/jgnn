@@ -19,6 +19,7 @@ def build_transformation(
     apply_selection: bool = False,
     apply_uncertainty: bool = False,
     graph_args: dict = None,
+    projection_args: dict = None,
     selection_args: dict = None,
     uncertainty_args: dict = None,
     norm_dict = None,
@@ -31,7 +32,7 @@ def build_transformation(
 
     # Apply random projection and/or selection function
     if apply_projection:
-        transforms.append(RandomProjection())
+        transforms.append(RandomProjection(**projection_args))
     if apply_selection:
         if selection_args is None:
             raise ValueError('`selection_args` must be provided when `apply_selection` is True.')
