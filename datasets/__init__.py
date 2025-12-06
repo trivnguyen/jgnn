@@ -121,14 +121,8 @@ def read_datasets(
 def prepare_dataloaders(
     node_feats, graph_feats, labels, train_frac=0.8, train_batch_size=32,
     eval_batch_size=32, num_workers=1, norm_dict=None, seed=0,
-    norm_version='v2',
 ):
     """ Prepare the dataloaders for training and validation. """
-
-    if norm_version not in ['v1', 'v2']:
-        raise ValueError(
-            f"Invalid norm_version {norm_version}. "
-            "Supported versions are 'v1' and 'v2'.")
 
     pl.seed_everything(seed)
 
@@ -165,74 +159,59 @@ def prepare_dataloaders(
         theta_loc = torch.tensor(norm_dict['theta_loc'], dtype=torch.float32, device=device)
         theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32, device=device)
     else:
-        if norm_version == 'v1':
-            # old normalization scheme for 2D data
-            if norm_dict is None:
-                x_train = torch.cat([g.x for g in train_graphs])
-                theta_train = torch.cat([g.theta for g in train_graphs])
-                x_loc = x_train.mean(dim=0)
-                x_scale = x_train.std(dim=0)
-                theta_loc = theta_train.mean(dim=0)
-                theta_scale = theta_train.std(dim=0)
-        elif norm_version == 'v2':
-            # new normalization scheme for 3D data
-            pos = torch.cat([g.pos for g in train_graphs])
-            vel = torch.cat([g.vel for g in train_graphs])
-            theta_train = torch.cat([g.theta for g in train_graphs], dim=0)
+        # new normalization scheme for 3D data
+        pos = torch.cat([g.pos for g in train_graphs])
+        vel = torch.cat([g.vel for g in train_graphs])
+        theta_train = torch.cat([g.theta for g in train_graphs], dim=0)
 
-            # normalize the position and velocity
-            rad3d = torch.norm(pos, dim=1).view(-1, 1)
-            vel3d = torch.norm(vel, dim=1).view(-1, 1)
-            log_rad = torch.log10(rad3d + 1e-6)
-            x_loc = torch.cat([log_rad, vel3d], dim=1).mean(dim=0)
-            x_scale = torch.cat([log_rad, vel3d], dim=1).std(dim=0)
+        # normalize the position and velocity
+        rad3d = torch.norm(pos, dim=1).view(-1, 1)
+        vel3d = torch.norm(vel, dim=1).view(-1, 1)
+        log_rad = torch.log10(rad3d + 1e-6)
+        x_loc = torch.cat([log_rad, vel3d], dim=1).mean(dim=0)
+        x_scale = torch.cat([log_rad, vel3d], dim=1).std(dim=0)
 
-            # min max normalization for Theta [-1, 1] instead
-            theta_min = theta_train.min(dim=0)[0]
-            theta_max = theta_train.max(dim=0)[0]
-            theta_loc = (theta_max + theta_min) / 2
-            theta_scale = (theta_max - theta_min) / 2
+        # min max normalization for Theta [-1, 1] instead
+        theta_min = theta_train.min(dim=0)[0]
+        theta_max = theta_train.max(dim=0)[0]
+        theta_loc = (theta_max + theta_min) / 2
+        theta_scale = (theta_max - theta_min) / 2
 
-        norm_dict = {
-            'x_loc': list(x_loc.cpu().numpy()),
-            'x_scale': list(x_scale.cpu().numpy()),
-            'theta_loc': list(theta_loc.cpu().numpy()),
-            'theta_scale': list(theta_scale.cpu().numpy()),
-        }
+    norm_dict = {
+        'x_loc': list(x_loc.cpu().numpy()),
+        'x_scale': list(x_scale.cpu().numpy()),
+        'theta_loc': list(theta_loc.cpu().numpy()),
+        'theta_scale': list(theta_scale.cpu().numpy()),
+    }
 
-    if norm_version == 'v1':
-        for g in train_graphs:
-            # g.x = (g.x - x_loc) / x_scale
-            g.theta = (g.theta - theta_loc) / theta_scale
-        for g in val_graphs:
-            # g.x = (g.x - x_loc) / x_scale
-            g.theta = (g.theta - theta_loc) / theta_scale
-    elif norm_version == 'v2':
-        for g in train_graphs:
-            g.theta = (g.theta - theta_loc) / theta_scale
-        for g in val_graphs:
-            g.theta = (g.theta - theta_loc) / theta_scale
+    for g in train_graphs:
+        g.theta = (g.theta - theta_loc) / theta_scale
+    for g in val_graphs:
+        g.theta = (g.theta - theta_loc) / theta_scale
 
     # create data loaders
     train_loader = PyGDataLoader(
-        train_graphs, batch_size=train_batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=False)
+        train_graphs,
+        batch_size=train_batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=False
+    )
     val_loader = PyGDataLoader(
-        val_graphs, batch_size=eval_batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=False)
+        val_graphs,
+        batch_size=eval_batch_size,
+        shuffle=True,  # for the visualization callback, which assumes shuffling
+        num_workers=num_workers,
+        pin_memory=False
+    )
 
     return train_loader, val_loader, norm_dict
 
 def prepare_test_dataloader(
     node_feats, graph_feats, labels, batch_size=32, num_workers=1, norm_dict=None,
-    seed=0, norm_version='v2', max_graphs=None
+    seed=0, max_graphs=None
 ):
     """ Prepare the dataloaders for training and validation. """
-
-    if norm_version not in ['v1', 'v2']:
-        raise ValueError(
-            f"Invalid norm_version {norm_version}. "
-            "Supported versions are 'v1' and 'v2'.")
 
     pl.seed_everything(seed)
 
@@ -266,48 +245,34 @@ def prepare_test_dataloader(
         theta_loc = torch.tensor(norm_dict['theta_loc'], dtype=torch.float32, device=device)
         theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32, device=device)
     else:
-        if norm_version == 'v1':
-            # old normalization scheme for 2D data
-            if norm_dict is None:
-                x_train = torch.cat([g.x for g in graphs])
-                theta_train = torch.cat([g.theta for g in graphs])
-                x_loc = x_train.mean(dim=0)
-                x_scale = x_train.std(dim=0)
-                theta_loc = theta_train.mean(dim=0)
-                theta_scale = theta_train.std(dim=0)
-        elif norm_version == 'v2':
-            # new normalization scheme for 3D data
-            pos = torch.cat([g.pos for g in graphs])
-            vel = torch.cat([g.vel for g in graphs])
-            theta_train = torch.cat([g.theta for g in graphs], dim=0)
+        # new normalization scheme for 3D data
+        pos = torch.cat([g.pos for g in graphs])
+        vel = torch.cat([g.vel for g in graphs])
+        theta_train = torch.cat([g.theta for g in graphs], dim=0)
 
-            # normalize the position and velocity
-            rad3d = torch.norm(pos, dim=1).view(-1, 1)
-            vel3d = torch.norm(vel, dim=1).view(-1, 1)
-            log_rad = torch.log10(rad3d + 1e-6)
-            x_loc = torch.cat([log_rad, vel3d], dim=1).mean(dim=0)
-            x_scale = torch.cat([log_rad, vel3d], dim=1).std(dim=0)
+        # normalize the position and velocity
+        rad3d = torch.norm(pos, dim=1).view(-1, 1)
+        vel3d = torch.norm(vel, dim=1).view(-1, 1)
+        log_rad = torch.log10(rad3d + 1e-6)
+        x_loc = torch.cat([log_rad, vel3d], dim=1).mean(dim=0)
+        x_scale = torch.cat([log_rad, vel3d], dim=1).std(dim=0)
 
-            # min max normalization for Theta [-1, 1] instead
-            theta_min = theta_train.min(dim=0)[0]
-            theta_max = theta_train.max(dim=0)[0]
-            theta_loc = (theta_max + theta_min) / 2
-            theta_scale = (theta_max - theta_min) / 2
+        # min max normalization for Theta [-1, 1] instead
+        theta_min = theta_train.min(dim=0)[0]
+        theta_max = theta_train.max(dim=0)[0]
+        theta_loc = (theta_max + theta_min) / 2
+        theta_scale = (theta_max - theta_min) / 2
 
-        norm_dict = {
-            'x_loc': list(x_loc.cpu().numpy()),
-            'x_scale': list(x_scale.cpu().numpy()),
-            'theta_loc': list(theta_loc.cpu().numpy()),
-            'theta_scale': list(theta_scale.cpu().numpy()),
-        }
+    norm_dict = {
+        'x_loc': list(x_loc.cpu().numpy()),
+        'x_scale': list(x_scale.cpu().numpy()),
+        'theta_loc': list(theta_loc.cpu().numpy()),
+        'theta_scale': list(theta_scale.cpu().numpy()),
+    }
 
-    if norm_version == 'v1':
-        for g in graphs:
-            # g.x = (g.x - x_loc) / x_scale
-            g.theta = (g.theta - theta_loc) / theta_scale
-    elif norm_version == 'v2':
-        for g in graphs:
-            g.theta = (g.theta - theta_loc) / theta_scale
+    # only normalize theta since x is computed on the fly in the model
+    for g in graphs:
+        g.theta = (g.theta - theta_loc) / theta_scale
 
     # create data loaders
     loader = PyGDataLoader(
@@ -417,7 +382,7 @@ def prepare_dataloaders_recon(
         ),
         batch_size=eval_batch_size,
         num_workers=num_workers,
-        shuffle=False,
+        shuffle=True,   # for the visualization callback, which assumes shuffling
         pin_memory=False
     )
 
