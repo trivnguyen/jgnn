@@ -169,8 +169,13 @@ class NPE(pl.LightningModule):
             torch.Tensor: Posterior samples of shape (batch_size, num_samples, output_size)
         """
         self.eval()
+
+        # Apply pre-transforms if provided, else fall back to model's pre_transforms
         if pre_transforms is not None:
             batch = pre_transforms(batch)
+        elif self.pre_transforms is not None:
+            batch = self.pre_transforms(batch)
+
         batch = batch.to(self.device)
         embedding = self.forward(batch)
         posterior = self.flows(embedding).sample((num_samples, ))  # (num_samples, batch_size, output_size)

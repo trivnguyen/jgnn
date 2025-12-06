@@ -2,8 +2,10 @@
 
 from . import models
 from . import transforms
+from . import callbacks
 
 __all__ = [
     'models',
     'transforms',
+    'callbacks',
 ]

@@ -60,4 +60,5 @@ def build_transformation(
         transforms.append(ALL_GRAPHS[graph_name.lower()](**graph_args))
 
     transforms = T.Compose(transforms)
+    print(transforms)
     return transforms

@@ -25,6 +25,7 @@ from ml_collections import config_flags
 import datasets
 from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
 from jgnn.transforms import build_transformation
+from jgnn.callbacks.visualization import NPEVisualizationCallback
 
 
 def setup_workdir(workdir: str) -> Path:
@@ -258,7 +259,8 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
     Returns:
         List of callback instances
     """
-    return [
+    # default callbacks
+    callbacks = [
         EarlyStopping(
             monitor='val/loss',
             mode='min',
@@ -282,6 +284,23 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
         ),
         LearningRateMonitor(logging_interval="step"),
     ]
+
+    if config.get('enable_visualization_callback', True):
+        print("[Callbacks] Adding NPE Visualization Callback")
+        callbacks.append(
+            NPEVisualizationCallback(
+                plot_every_n_epochs=config.visualization.get('plot_every_n_epochs', 1),
+                n_posterior_samples=config.visualization.get('n_posterior_samples', 1000),
+                n_val_samples=config.visualization.get('n_val_samples', 100),
+                plot_median_v_true=config.visualization.get('plot_median_v_true', True),
+                plot_tarp=config.visualization.get('plot_tarp', True),
+                plot_rank=config.visualization.get('plot_rank', True),
+                use_default_mplstyle=config.visualization.get('use_default_mplstyle', True),
+            )
+        )
+
+    return callbacks
+
 
 
 def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
