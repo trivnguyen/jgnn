@@ -5,9 +5,9 @@ from typing import Dict, Any
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from .layers import GNN, MLP
-from .utils import get_activation, configure_optimizers
-from .utils import build_embedding_loss
+from ..layers import GNN, MLP
+from ..utils import get_activation, configure_optimizers
+from ..utils import build_embedding_loss
 
 
 class GNNEmbedding(pl.LightningModule):

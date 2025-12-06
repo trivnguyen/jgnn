@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 
-from .layers import Transformer, MLP
-from .utils import get_activation, configure_optimizers
-from .utils import build_embedding_loss
+from ..layers import Transformer, MLP
+from ..utils import get_activation, configure_optimizers
+from ..utils import build_embedding_loss
 
 
 class TransformerEmbedding(pl.LightningModule):

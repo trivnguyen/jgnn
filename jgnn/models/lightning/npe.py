@@ -8,8 +8,8 @@ import pytorch_lightning as pl
 from ml_collections import ConfigDict
 from tqdm import tqdm
 
-from .utils import get_activation, configure_optimizers
-from .flows import build_flows
+from ..utils import get_activation, configure_optimizers
+from ..flows import build_flows
 
 class NPE(pl.LightningModule):
     """Neural Posterior Estimation model for graph-structured data.
