@@ -3,11 +3,11 @@
 from .gnn_embedding import GNNEmbedding
 from .transformer_embedding import TransformerEmbedding
 from .npe import NPE
-# from .sequential_npe import SequentialNPE
+from .sequential_npe import SequentialNPE
 
 __all__ = [
     'GNNEmbedding',
     'TransformerEmbedding',
     'NPE',
-    # 'SequentialNPE',
+    'SequentialNPE',
 ]
