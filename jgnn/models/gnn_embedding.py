@@ -50,6 +50,7 @@ class GNNEmbedding(pl.LightningModule):
         optimizer_args: Dict[str, Any] = None,
         scheduler_args: Dict[str, Any] = None,
         pre_transforms=None,
+        norm_dict=None,
     ):
         super().__init__()
         self.input_size = input_size
@@ -62,6 +63,7 @@ class GNNEmbedding(pl.LightningModule):
         self.optimizer_args = optimizer_args or {}
         self.scheduler_args = scheduler_args or {}
         self.pre_transforms = pre_transforms
+        self.norm_dict = norm_dict
         self.save_hyperparameters(ignore=['pre_transforms'])
 
         self._setup_model()

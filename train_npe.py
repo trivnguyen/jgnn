@@ -210,7 +210,7 @@ def create_model(
         embedding_nn = create_embedding_network(config)
 
     # Create NPE model
-    # Note: pre_transforms goes to NPE, not embedding_nn (as per requirement)
+    # Note: pre_transforms goes to NPE, not embedding_nn
     print("[Model] Creating NPE model...")
     model = NPE(
         input_size=config.model.input_size,

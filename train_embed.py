@@ -23,7 +23,7 @@ from absl import flags
 from ml_collections import config_flags
 
 import datasets
-from jgnn.models.gnn_embedding import GNNEmbedding
+from jgnn.models import GNNEmbedding
 from jgnn.transforms import build_transformation
 
 
@@ -90,18 +90,20 @@ def prepare_data(config: ml_collections.ConfigDict):
         seed=config.seed_data,
     )
 
-    # Build pre-transforms if specified
-    pre_transforms = build_transformation(**config.pre_transforms)
-
-    return train_loader, val_loader, pre_transforms
+    return train_loader, val_loader, norm_dict
 
 
-def create_model(config: ml_collections.ConfigDict, pre_transforms) -> GNNEmbedding:
+def create_model(
+    config: ml_collections.ConfigDict,
+    pre_transforms,
+    norm_dict
+) -> GNNEmbedding:
     """Create the GNN embedding model.
 
     Args:
         config: Configuration dictionary
         pre_transforms: Pre-transformation pipeline
+        norm_dict: Normalization dictionary to pass to the model
 
     Returns:
         GNNEmbedding model instance
@@ -116,14 +118,16 @@ def create_model(config: ml_collections.ConfigDict, pre_transforms) -> GNNEmbedd
         optimizer_args=config.optimizer,
         scheduler_args=config.scheduler,
         pre_transforms=pre_transforms,
+        norm_dict=norm_dict,
     )
 
 
-def create_callbacks(config: ml_collections.ConfigDict) -> list:
+def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogger) -> list:
     """Create PyTorch Lightning callbacks.
 
     Args:
         config: Configuration dictionary
+        wandb_logger: WandB logger instance (used to get checkpoint directory)
 
     Returns:
         List of callback instances
@@ -140,13 +144,15 @@ def create_callbacks(config: ml_collections.ConfigDict) -> list:
             monitor='val/loss',
             mode='min',
             save_top_k=config.save_top_k,
-            save_weights_only=False
+            save_weights_only=False,
+            auto_insert_metric_name=False,
         ),
         ModelCheckpoint(
             filename="last",
             save_top_k=1,
             save_weights_only=False,
-            save_last=True
+            save_last=True,
+            auto_insert_metric_name=False,
         ),
         LearningRateMonitor(logging_interval="step"),
     ]
@@ -191,15 +197,18 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         resume="allow",
     )
 
+    # Build pre-transforms (will be passed to NPE, not embedding_nn)
+    print("[Transforms] Building pre-transforms...")
+    pre_transforms = build_transformation(**config.pre_transforms)
+
     # Prepare data
     print("[Data] Loading datasets...")
-    train_loader, val_loader, pre_transforms = prepare_data(config)
+    train_loader, val_loader, norm_dict = prepare_data(config)
     print(f"[Data] Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
 
     # Create model
     print("[Model] Creating GNN embedding model...")
-    model = create_model(config, pre_transforms)
-    print(f"[Model] Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+    model = create_model(config, pre_transforms, norm_dict)
 
     # Print trainable vs frozen parameters
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -208,6 +217,9 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     print(f"[Model] Trainable parameters: {trainable_params:,}")
     print(f"[Model] Frozen parameters: {frozen_params:,}")
 
+    # this watches all parameters and gradients
+    wandb_logger.watch(model, log="all", log_freq=500, log_graph=True)
+
     # Get checkpoint path if resuming
     if resume_training:
         checkpoint_path = get_checkpoint_path(config, run_dir)
@@ -215,7 +227,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
     # Create callbacks
-    callbacks = create_callbacks(config)
+    callbacks = create_callbacks(config, wandb_logger)
     print(f"[Callbacks] Created {len(callbacks)} callbacks")
 
     # Create trainer
