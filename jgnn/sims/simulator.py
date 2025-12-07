@@ -157,7 +157,7 @@ def create_galaxy_model(
     return galaxy_model
 
 
-def run_simulations(
+def run_simulation(
     params: Dict, num_stars: int, max_iter: int = N_MAX_ITER) -> Tuple[Dict, Dict]:
     """
     Simulate stellar kinematics for a single dwarf galaxy.
@@ -343,9 +343,9 @@ def preprocess(
         # large velocity can be due to AGAMA sampling issues
         vel3d = np.linalg.norm(vel, axis=1)
         mask = (vel3d > vrange[0]) & (vel3d < vrange[1])
-        if np.sum(mask) < len(pos) * 0.5:
+        if np.sum(mask) < int(len(pos) * 0.5):
             # if half of the stars are outside the velocity range, skip this galaxy
-            print(f'Skipping galaxy {i} due to velocity cut')
+            print(f'Skipping galaxy {i} due to 3D velocity cut')
             continue
         pos = pos[mask]
         vel = vel[mask]
@@ -368,7 +368,7 @@ def preprocess(
         radius = np.linalg.norm(pos, axis=1)
         mask = (radius > min_radius) & (radius < max_radius)
 
-        if np.sum(mask) < len(pos) * 0.5:
+        if np.sum(mask) < int(len(pos) * 0.5):
             # if half of the stars are outside the radius range, skip this galaxy
             print(f'Skipping galaxy {i} due to radius cut')
             continue

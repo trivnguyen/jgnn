@@ -7,6 +7,6 @@ is the `simulator()` function which takes galaxy parameters and returns
 node and graph features suitable for sequential SNPE.
 """
 
-from .simulator import run_simulations
+from .simulator import run_simulation
 
-__all__ = ['run_simulations']
+__all__ = ['run_simulation']
