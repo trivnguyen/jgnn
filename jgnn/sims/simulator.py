@@ -3,6 +3,7 @@ Core simulation functionality for generating dwarf galaxy stellar kinematics.
 """
 from typing import Dict, Tuple, Optional
 
+import warnings
 import numpy as np
 import astropy.units as u
 
@@ -17,6 +18,10 @@ try:
     _AGAMA_AVAILABLE = True
 except ImportError as e:
     _AGAMA_IMPORT_ERROR = str(e)
+    warnings.warn(
+        f"AGAMA could not be imported. Simulation functionality will be unavailable. "
+        f"Original error: {_AGAMA_IMPORT_ERROR}"
+    )
     agama = None
 
 from . import utils
@@ -112,7 +117,7 @@ def _parse_parameters(
 def create_galaxy_model(
     dm_type: str, stellar_type: str, df_type: str,
     dm_params: Dict, stellar_params: Dict, df_params: Dict
-) -> agama.GalaxyModel:
+):
     """
     Create an AGAMA galaxy model from parsed parameters.
 
@@ -152,7 +157,7 @@ def create_galaxy_model(
     return galaxy_model
 
 
-def simulator(
+def run_simulations(
     params: Dict, num_stars: int, max_iter: int = N_MAX_ITER) -> Tuple[Dict, Dict]:
     """
     Simulate stellar kinematics for a single dwarf galaxy.
