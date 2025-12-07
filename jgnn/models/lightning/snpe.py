@@ -230,3 +230,51 @@ class SequentialNPE(pl.LightningModule):
         """Initialize optimizer and LR scheduler."""
         return models_utils.configure_optimizers(
             self.parameters(), self.optimizer_args, self.scheduler_args)
+
+    @torch.no_grad()
+    def sample_from_batch(self, batch, num_samples, pre_transforms=None):
+        """Sample from the posterior distribution for a given batch.
+
+        Args:
+            batch: Input batch data
+            num_samples: Number of posterior samples to draw per input
+            pre_transforms: Optional data transformations to apply. If given,
+                            these will override the model's pre_transforms.
+        Returns:
+            torch.Tensor: Posterior samples of shape (batch_size, num_samples, output_size)
+        """
+        self.eval()
+
+        # Apply pre-transforms if provided, else fall back to model's pre_transforms
+        if pre_transforms is not None:
+            batch = pre_transforms(batch)
+        elif self.pre_transforms is not None:
+            batch = self.pre_transforms(batch)
+
+        batch = batch.to(self.device)
+        embedding = self.forward(batch)
+        posterior = self.flows(embedding).sample((num_samples, ))  # (num_samples, batch_size, output_size)
+        posterior = posterior.transpose(0, 1) # (batch_size, num_samples, output_size)
+        return posterior
+
+    @torch.no_grad()
+    def sample_from_loader(self, loader, num_samples, pre_transforms=None, verbose=True):
+        """Sample from the posterior distribution for all data in a DataLoader.
+
+        Args:
+            loader: DataLoader containing the input data
+            num_samples: Number of posterior samples to draw per input
+            pre_transforms: Optional data transformations to apply. If given,
+                            these will override the model's pre_transforms.
+            verbose: Whether to display a progress bar
+        Returns:
+            torch.Tensor: Posterior samples of shape (num_data, num_samples, output_size)
+        """
+        self.eval()
+        posteriors = []
+        for batch in tqdm(loader, disable=not verbose):
+            posterior = self.sample_from_batch(
+                batch, num_samples, pre_transforms=pre_transforms)
+            posteriors.append(posterior.cpu())
+        posteriors = torch.cat(posteriors, dim=0)
+        return posteriors
