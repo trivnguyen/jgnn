@@ -134,6 +134,8 @@ class NPEVisualizationCallback(pl.Callback):
             matplotlib.figure.Figure: Figure containing the plots
         """
         median_posterior = torch.median(samples, dim=1)[0]  # (n_samples, n_params)
+        p68_lower = torch.quantile(samples, 0.16, dim=1)
+        p68_upper = torch.quantile(samples, 0.84, dim=1)
         n_params = true_params.shape[1]
 
         fig, axes = plt.subplots(1, n_params, figsize=(5 * n_params, 4))
@@ -141,12 +143,25 @@ class NPEVisualizationCallback(pl.Callback):
             axes = [axes]
 
         for i, ax in enumerate(axes):
-            ax.scatter(true_params[:, i], median_posterior[:, i], alpha=0.5, s=10)
+            # Scatter plot with error bars
+            x = true_params[:, i]
+            y = median_posterior[:, i]
+            yerr = [(median_posterior[:, i] - p68_lower[:, i]),
+                    (p68_upper[:, i] - median_posterior[:, i])]
+            ax.errorbar(x, y, yerr=yerr, fmt='o', alpha=0.3, markersize=10,
+                        ecolor='gray', capsize=2)
 
             # 1:1 line
             min_val = min(true_params[:, i].min(), median_posterior[:, i].min())
             max_val = max(true_params[:, i].max(), median_posterior[:, i].max())
             ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.3, lw=2)
+
+            # calculate R2 coefficient
+            ss_res = torch.sum((y - x) ** 2)
+            ss_tot = torch.sum((x - torch.mean(x)) ** 2)
+            r2 = 1 - ss_res / ss_tot
+            ax.text(0.05, 0.95, f'$R^2$ = {r2:.3f}', transform=ax.transAxes,
+                    verticalalignment='top', fontsize=12)
 
             ax.set_xlabel(f'True Parameter {i}')
             ax.set_ylabel(f'Median Posterior {i}')
