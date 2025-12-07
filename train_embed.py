@@ -8,7 +8,6 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
-import yaml
 import wandb
 import ml_collections
 import pytorch_lightning as pl
@@ -200,13 +199,6 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     run_dir = setup_workdir(workdir)
     print(f"[Setup] Run directory: {run_dir}")
 
-    # Save config
-    config_dict = config.to_dict()
-    config_path = run_dir / 'config.yaml'
-    with open(config_path, 'w') as f:
-        yaml.dump(config_dict, f)
-    print(f"[Setup] Config saved to: {config_path}")
-
     # Initialize wandb logger
     wandb_mode = 'disabled' if config.get('debug', False) else 'online'
     print(f"[WandB] Mode: {wandb_mode}")
@@ -216,7 +208,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         name=config.get("name"),
         save_dir=str(run_dir),
         log_model="all",
-        config=config_dict,
+        config=config.to_dict(),
         mode=wandb_mode,
         resume="allow",
     )
