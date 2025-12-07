@@ -156,18 +156,10 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
             verbose=True
         ),
         ModelCheckpoint(
-            filename="{epoch}-{step}-{val/loss:.4f}",
+            filename="epoch={epoch}-step={step}-loss={val/loss:.4f}",
             monitor='val/loss',
             mode='min',
             save_top_k=3,  # saves last 3 best checkpoints
-            save_weights_only=False,
-            auto_insert_metric_name=False,
-        ),
-        ModelCheckpoint(
-            filename="best",
-            monitor='val/loss',
-            mode='min',
-            save_top_k=1,  # saves only the best checkpoint
             save_weights_only=False,
             auto_insert_metric_name=False,
         ),
