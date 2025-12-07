@@ -279,7 +279,8 @@ def preprocess(
     projection_axis: Optional[int] = None,
     use_proper_motions: bool = False,
     norm_rstar: bool = False,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    verbose: bool = False,
 ) -> Tuple[Dict, Dict]:
     """ Preprocess the raw simulation data into training data. Applies
     velocity cuts, projects to 2D, and selects stars within radius range.
@@ -311,6 +312,8 @@ def preprocess(
         Whether to normalize positions by stellar rstar.
     seed : int, optional
         Random seed for reproducibility.
+    verbose : bool
+        Whether to print verbose messages.
 
     Returns
     -------
@@ -345,7 +348,8 @@ def preprocess(
         mask = (vel3d > vrange[0]) & (vel3d < vrange[1])
         if np.sum(mask) < int(len(pos) * 0.5):
             # if half of the stars are outside the velocity range, skip this galaxy
-            print(f'Skipping galaxy {i} due to 3D velocity cut')
+            if verbose:
+                print(f'Skipping galaxy {i} due to 3D velocity cut')
             continue
         pos = pos[mask]
         vel = vel[mask]
@@ -354,7 +358,8 @@ def preprocess(
         vdisp = np.std(vel, axis=0)
         vdisp = np.linalg.norm(vdisp)
         if vdisp < vdisp_range[0] or vdisp > vdisp_range[1]:
-            print(f'Skipping galaxy {i} due to velocity dispersion cut')
+            if verbose:
+                print(f'Skipping galaxy {i} due to velocity dispersion cut')
             continue
 
         # project onto 2D plane
