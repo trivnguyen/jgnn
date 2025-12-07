@@ -647,15 +647,15 @@ def main(config: ml_collections.ConfigDict):
     )
 
     # Save parameter samples separately
-    samples_path = config.output.path.replace('.hdf5', '_samples.npy')
-    np.save(samples_path, samples)
-    print(f"[Save] Parameter samples saved to: {samples_path}")
+    # samples_path = config.output.path.replace('.hdf5', '_samples.npy')
+    # np.save(samples_path, samples)
+    # print(f"[Save] Parameter samples saved to: {samples_path}")
 
     # Save config
-    config_path = config.output.path.replace('.hdf5', '_config.yaml')
-    with open(config_path, 'w') as f:
-        yaml.dump(config.to_dict(), f)
-    print(f"[Save] Config saved to: {config_path}")
+    # config_path = config.output.path.replace('.hdf5', '_config.yaml')
+    # with open(config_path, 'w') as f:
+    #     yaml.dump(config.to_dict(), f)
+    # print(f"[Save] Config saved to: {config_path}")
 
     print("\n[Done] Simulation complete!")
 
