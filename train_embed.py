@@ -74,7 +74,8 @@ def prepare_data(config: ml_collections.ConfigDict):
         config.data_root,
         config.data_name,
         config.num_datasets,
-        concat=True
+        init=config.get('init', 0),
+        concat=True,
     )
 
     # Create dataloaders
