@@ -62,11 +62,13 @@ def get_checkpoint_path(config: ml_collections.ConfigDict, workdir: Path) -> str
     return str(workdir / 'lightning_logs' / 'checkpoints' / ckpt)
 
 
-def load_embedding_network(checkpoint_path: str, freeze: bool = False):
+def load_embedding_network(
+    config: ml_collections.ConfigDict, checkpoint_path: str, freeze: bool = False):
     """Load a pre-trained embedding network from checkpoint.
 
     Args:
-        checkpoint_path: Path to the GNNEmbedding checkpoint
+        config: Configuration dictionary
+        checkpoint_path: Path to checkpoint
         freeze: If True, freeze all parameters of the embedding network
 
     Returns:
@@ -80,13 +82,15 @@ def load_embedding_network(checkpoint_path: str, freeze: bool = False):
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
     # Load the embedding model
-    if 'model_type' in checkpoint['hyper_parameters'] \
-        and checkpoint['hyper_parameters']['model_type'] == 'transformer':
+    if config.model.embedding.type == 'transformer':
         print(f"[Embedding] Detected TransformerEmbedding model type")
         embedding_nn = TransformerEmbedding.load_from_checkpoint(checkpoint_path)
-    else:
+    elif config.model.embedding.type == 'gnn':
         print(f"[Embedding] Detected GNNEmbedding model type")
         embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
+    else:
+        raise ValueError(
+            f"Unsupported embedding model type: {config.model.embedding.type}")
 
     # Extract norm_dict if available in the hyperparameters
     norm_dict = None
@@ -125,6 +129,7 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
         config.data_root,
         config.data_name,
         config.num_datasets,
+        init=config.get('init', 0),
         concat=True
     )
 
@@ -208,12 +213,13 @@ def create_model(
         NPE model instance
     """
     # Check if we should load a pre-trained embedding network
-    embedding_checkpoint = config.model.get('embedding_checkpoint', None)
-    freeze_embedding = config.model.get('freeze_embedding', False)
+    embedding_checkpoint = config.model.embedding.get('checkpoint', None)
+    freeze_embedding = config.model.embedding.get('freeze', False)
 
     if embedding_checkpoint is not None:
         # Load pre-trained embedding network
         embedding_nn, _ = load_embedding_network(
+            config,
             embedding_checkpoint,
             freeze=freeze_embedding
         )
