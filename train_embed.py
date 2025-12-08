@@ -82,6 +82,7 @@ def prepare_data(config: ml_collections.ConfigDict):
         node_feats,
         graph_feats,
         config.labels,
+        cond_labels=config.get('cond_labels', None),
         train_batch_size=config.train_batch_size,
         eval_batch_size=config.eval_batch_size,
         train_frac=config.train_frac,

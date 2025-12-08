@@ -133,31 +133,22 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
     if embedding_norm_dict is not None and config.get('reuse_embedding_norm_dict', True):
         print("[Data] Reusing normalization dict from embedding checkpoint")
         norm_dict = embedding_norm_dict
-
-        # Create dataloaders with existing norm_dict
-        train_loader, val_loader, _ = datasets.prepare_dataloaders(
-            node_feats,
-            graph_feats,
-            config.labels,
-            train_batch_size=config.train_batch_size,
-            eval_batch_size=config.eval_batch_size,
-            train_frac=config.train_frac,
-            num_workers=config.num_workers,
-            seed=config.seed_data,
-        )
     else:
-        # Compute norm_dict from data
-        print("[Data] Computing normalization dict from data")
-        train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
-            node_feats,
-            graph_feats,
-            config.labels,
-            train_batch_size=config.train_batch_size,
-            eval_batch_size=config.eval_batch_size,
-            train_frac=config.train_frac,
-            num_workers=config.num_workers,
-            seed=config.seed_data,
-        )
+        norm_dict = None
+
+    # Create dataloaders with existing norm_dict
+    train_loader, val_loader, _ = datasets.prepare_dataloaders(
+        node_feats,
+        graph_feats,
+        config.labels,
+        cond_labels=config.get('cond_labels', None),
+        train_batch_size=config.train_batch_size,
+        eval_batch_size=config.eval_batch_size,
+        train_frac=config.train_frac,
+        num_workers=config.num_workers,
+        seed=config.seed_data,
+        norm_dict=norm_dict
+    )
 
     return train_loader, val_loader, norm_dict
 
