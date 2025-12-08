@@ -1,12 +1,11 @@
-
 import os
+import warnings
 import h5py
 from tqdm import tqdm
 
 import numpy as np
 import torch
 import pytorch_lightning as pl
-from tqdm import tqdm
 from torch.utils.data import DataLoader, TensorDataset
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader as PyGDataLoader
@@ -62,7 +61,7 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
         for key in headers['node_features']:
             if key in features_list:
                 if f.get(key) is None:
-                    logger.warning(f"Feature {key} not found in {path}")
+                    warnings.warn(f"Feature {key} not found in {path}")
                     continue
                 if concat:
                     node_features[key] = f[key][:]
@@ -74,7 +73,7 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
         for key in headers['graph_features']:
             if key in features_list:
                 if f.get(key) is None:
-                    logger.warning(f"Feature {key} not found in {path}")
+                    warnings.warn(f"Feature {key} not found in {path}")
                     continue
                 graph_features[key] = f[key][:]
 
@@ -120,7 +119,7 @@ def read_datasets(
 ### For inference task ###
 def prepare_dataloaders(
     node_feats, graph_feats, labels, train_frac=0.8, train_batch_size=32,
-    eval_batch_size=32, num_workers=1, norm_dict=None, seed=0,
+    eval_batch_size=32, num_workers=1, norm_dict=None, seed=0, cond_labels=None
 ):
     """ Prepare the dataloaders for training and validation. """
 
@@ -137,8 +136,8 @@ def prepare_dataloaders(
         pos = node_feats['pos'][ptr[i]:ptr[i+1]]
         vel = node_feats['vel'][ptr[i]:ptr[i+1]]
         vel_error = node_feats['vel_error'][ptr[i]:ptr[i+1]]
-        cond = graph_feats['cond'][i]
         flow_labels = [graph_feats[k][i] for k in labels]
+        cond = [graph_feats[k][i] for k in cond_labels] if cond_labels is not None else None
 
         graph = preprocess.create_graph_from_posvel(
             pos, vel, vel_error=vel_error, label=flow_labels, cond=cond)
@@ -158,15 +157,18 @@ def prepare_dataloaders(
         x_scale = torch.tensor(norm_dict['x_scale'], dtype=torch.float32, device=device)
         theta_loc = torch.tensor(norm_dict['theta_loc'], dtype=torch.float32, device=device)
         theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32, device=device)
+        if cond_labels is not None:
+            cond_loc = torch.tensor(norm_dict['cond_loc'], dtype=torch.float32, device=device)
+            cond_scale = torch.tensor(norm_dict['cond_scale'], dtype=torch.float32, device=device)
     else:
         # new normalization scheme for 3D data
-        pos = torch.cat([g.pos for g in train_graphs])
-        vel = torch.cat([g.vel for g in train_graphs])
+        pos_train = torch.cat([g.pos for g in train_graphs])
+        vel_train = torch.cat([g.vel for g in train_graphs])
         theta_train = torch.cat([g.theta for g in train_graphs], dim=0)
 
         # normalize the position and velocity
-        rad3d = torch.norm(pos, dim=1).view(-1, 1)
-        vel3d = torch.norm(vel, dim=1).view(-1, 1)
+        rad3d = torch.norm(pos_train, dim=1).view(-1, 1)
+        vel3d = torch.norm(vel_train, dim=1).view(-1, 1)
         log_rad = torch.log10(rad3d + 1e-6)
         x_loc = torch.cat([log_rad, vel3d], dim=1).mean(dim=0)
         x_scale = torch.cat([log_rad, vel3d], dim=1).std(dim=0)
@@ -177,17 +179,33 @@ def prepare_dataloaders(
         theta_loc = (theta_max + theta_min) / 2
         theta_scale = (theta_max - theta_min) / 2
 
+        # min max normalization for cond if needed
+        if cond_labels is not None:
+            cond_train = torch.cat([g.cond for g in train_graphs], dim=0)
+            cond_min = cond_train.min(dim=0)[0]
+            cond_max = cond_train.max(dim=0)[0]
+            cond_loc = (cond_max + cond_min) / 2
+            cond_scale = (cond_max - cond_min) / 2
+
     norm_dict = {
         'x_loc': list(x_loc.cpu().numpy()),
         'x_scale': list(x_scale.cpu().numpy()),
         'theta_loc': list(theta_loc.cpu().numpy()),
         'theta_scale': list(theta_scale.cpu().numpy()),
     }
+    if cond_labels is not None:
+        norm_dict['cond_loc'] = list(cond_loc.cpu().numpy())
+        norm_dict['cond_scale'] = list(cond_scale.cpu().numpy())
 
+    # only normalize theta and cond since x is computed on the fly in the model
     for g in train_graphs:
         g.theta = (g.theta - theta_loc) / theta_scale
+        if cond_labels is not None:
+            g.cond = (g.cond - cond_loc) / cond_scale
     for g in val_graphs:
         g.theta = (g.theta - theta_loc) / theta_scale
+        if cond_labels is not None:
+            g.cond = (g.cond - cond_loc) / cond_scale
 
     # create data loaders
     train_loader = PyGDataLoader(
@@ -209,9 +227,9 @@ def prepare_dataloaders(
 
 def prepare_test_dataloader(
     node_feats, graph_feats, labels, batch_size=32, num_workers=1, norm_dict=None,
-    seed=0, max_graphs=None
+    seed=0, max_graphs=None, cond_labels=None
 ):
-    """ Prepare the dataloaders for training and validation. """
+    """ Prepare the dataloaders for testing. """
 
     pl.seed_everything(seed)
 
@@ -229,8 +247,8 @@ def prepare_test_dataloader(
         pos = node_feats['pos'][ptr[i]:ptr[i+1]]
         vel = node_feats['vel'][ptr[i]:ptr[i+1]]
         vel_error = node_feats['vel_error'][ptr[i]:ptr[i+1]]
-        cond = graph_feats['cond'][i]
         flow_labels = [graph_feats[k][i] for k in labels]
+        cond = [graph_feats[k][i] for k in cond_labels] if cond_labels is not None else None
 
         graph = preprocess.create_graph_from_posvel(
             pos, vel, vel_error=vel_error, label=flow_labels, cond=cond)
@@ -244,6 +262,9 @@ def prepare_test_dataloader(
         x_scale = torch.tensor(norm_dict['x_scale'], dtype=torch.float32, device=device)
         theta_loc = torch.tensor(norm_dict['theta_loc'], dtype=torch.float32, device=device)
         theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32, device=device)
+        if cond_labels is not None:
+            cond_loc = torch.tensor(norm_dict['cond_loc'], dtype=torch.float32, device=device)
+            cond_scale = torch.tensor(norm_dict['cond_scale'], dtype=torch.float32, device=device)
     else:
         # new normalization scheme for 3D data
         pos = torch.cat([g.pos for g in graphs])
@@ -263,16 +284,29 @@ def prepare_test_dataloader(
         theta_loc = (theta_max + theta_min) / 2
         theta_scale = (theta_max - theta_min) / 2
 
+        # min max normalization for cond if needed
+        if cond_labels is not None:
+            cond_train = torch.cat([g.cond for g in graphs], dim=0)
+            cond_min = cond_train.min(dim=0)[0]
+            cond_max = cond_train.max(dim=0)[0]
+            cond_loc = (cond_max + cond_min) / 2
+            cond_scale = (cond_max - cond_min) / 2
+
     norm_dict = {
         'x_loc': list(x_loc.cpu().numpy()),
         'x_scale': list(x_scale.cpu().numpy()),
         'theta_loc': list(theta_loc.cpu().numpy()),
         'theta_scale': list(theta_scale.cpu().numpy()),
     }
+    if cond_labels is not None:
+        norm_dict['cond_loc'] = list(cond_loc.cpu().numpy())
+        norm_dict['cond_scale'] = list(cond_scale.cpu().numpy())
 
-    # only normalize theta since x is computed on the fly in the model
+    # only normalize theta and cond since x is computed on the fly in the model
     for g in graphs:
         g.theta = (g.theta - theta_loc) / theta_scale
+        if cond_labels is not None:
+            g.cond = (g.cond - cond_loc) / cond_scale
 
     # create data loaders
     loader = PyGDataLoader(
@@ -280,110 +314,3 @@ def prepare_test_dataloader(
         num_workers=num_workers, pin_memory=False)
 
     return loader, norm_dict
-
-### For reconstruction task ###
-def prepare_dataloaders_recon(
-    node_feats, graph_feats, labels, train_frac=0.8, train_batch_size=32,
-    eval_batch_size=32, num_subsampling=None, num_workers=1, norm_dict=None,
-    seed=0,
-):
-    """ Prepare the dataloaders for training and validation. """
-
-    pl.seed_everything(seed)
-
-    num_graphs = len(graph_feats['num_stars'])
-    ptr = np.cumsum(graph_feats['num_stars'])
-    ptr = np.insert(ptr, 0, 0)
-
-    loop = tqdm(range(num_graphs), miniters=num_graphs // 100, desc='Creating dataloader')
-
-    pos_train, vel_true_train, theta_train = [], [], []
-    pos_val, vel_true_val, theta_val = [], [], []
-    for i in loop:
-        pos = node_feats['pos'][ptr[i]:ptr[i+1]]
-        vel_true = node_feats['vel_true'][ptr[i]:ptr[i+1]]
-        theta = np.array([graph_feats[k][i] for k in labels])
-
-        # subsample the stars if needed
-        if num_subsampling is not None and num_subsampling < len(pos):
-            idx = np.random.choice(len(pos), num_subsampling, replace=False)
-            pos = pos[idx]
-            vel_true = vel_true[idx]
-
-        pos = np.log10(np.linalg.norm(pos, axis=1).reshape(-1, 1))
-        vel_true = vel_true.reshape(-1, 1)
-        theta = np.repeat(theta.reshape(1, -1), len(pos), axis=0)
-
-        # decide whether to put the graph in train or val set
-        if np.random.rand() < train_frac:
-            pos_train.append(pos)
-            vel_true_train.append(vel_true)
-            theta_train.append(theta)
-        else:
-            pos_val.append(pos)
-            vel_true_val.append(vel_true)
-            theta_val.append(theta)
-
-    pos_train = np.concatenate(pos_train, axis=0)
-    vel_true_train = np.concatenate(vel_true_train, axis=0)
-    theta_train = np.concatenate(theta_train, axis=0)
-    pos_val = np.concatenate(pos_val, axis=0)
-    vel_true_val = np.concatenate(vel_true_val, axis=0)
-    theta_val = np.concatenate(theta_val, axis=0)
-
-    # Normalize the data
-    if norm_dict is not None:
-        pos_loc = np.array(norm_dict['pos_loc'])
-        pos_scale = np.array(norm_dict['pos_scale'])
-        theta_loc = np.array(norm_dict['theta_loc'])
-        theta_scale = np.array(norm_dict['theta_scale'])
-        vel_true_loc = np.array(norm_dict['vel_true_loc'])
-        vel_true_scale = np.array(norm_dict['vel_true_scale'])
-    else:
-        pos_loc, pos_scale = pos_train.mean(0), pos_train.std(0)
-        theta_loc, theta_scale = theta_train.mean(0), theta_train.std(0)
-        vel_true_min, vel_true_max = vel_true_train.min(0), vel_true_train.max(0)
-        vel_true_loc = (vel_true_min + vel_true_max) / 2
-        vel_true_scale = (vel_true_max - vel_true_min) / 2
-
-        norm_dict = {
-            'pos_loc': list(pos_loc),
-            'pos_scale': list(pos_scale),
-            'theta_loc': list(theta_loc),
-            'theta_scale': list(theta_scale),
-            'vel_true_loc': list(vel_true_loc),
-            'vel_true_scale': list(vel_true_scale),
-        }
-
-    pos_train = (pos_train - pos_loc) / pos_scale
-    vel_true_train = (vel_true_train - vel_true_loc) / vel_true_scale
-    theta_train = (theta_train - theta_loc) / theta_scale
-    pos_val = (pos_val - pos_loc) / pos_scale
-    vel_true_val = (vel_true_val - vel_true_loc) / vel_true_scale
-    theta_val = (theta_val - theta_loc) / theta_scale
-
-    # create data loaders
-    train_loader = DataLoader(
-        TensorDataset(
-            torch.tensor(pos_train, dtype=torch.float32),
-            torch.tensor(vel_true_train, dtype=torch.float32),
-            torch.tensor(theta_train, dtype=torch.float32),
-        ),
-        batch_size=train_batch_size,
-        num_workers=num_workers,
-        shuffle=True,
-        pin_memory=False,
-    )
-    val_loader = DataLoader(
-        TensorDataset(
-            torch.tensor(pos_val, dtype=torch.float32),
-            torch.tensor(vel_true_val, dtype=torch.float32),
-            torch.tensor(theta_val, dtype=torch.float32),
-        ),
-        batch_size=eval_batch_size,
-        num_workers=num_workers,
-        shuffle=True,   # for the visualization callback, which assumes shuffling
-        pin_memory=False
-    )
-
-    return train_loader, val_loader, norm_dict
