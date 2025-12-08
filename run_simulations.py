@@ -471,7 +471,6 @@ def main(config: ml_collections.ConfigDict):
 
     print(f"[Mode] Use proposal: {use_proposal}")
     print(f"[Mode] Use prior: {use_prior}")
-    print(f"[Mode] Use truncation: {use_truncation}")
 
     # Load proposal if specified
     proposal_model = None
@@ -622,7 +621,6 @@ def main(config: ml_collections.ConfigDict):
     metadata = {
         'use_proposal': use_proposal,
         'use_prior': use_prior,
-        'use_truncation': use_truncation,
         'num_galaxies': len(num_stars),
         'dm_type': config.simulation.dm_type,
         'stellar_type': config.simulation.stellar_type,
