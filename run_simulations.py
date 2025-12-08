@@ -468,7 +468,6 @@ def main(config: ml_collections.ConfigDict):
     # Determine sampling mode
     use_proposal = config.get('proposal') is not None and config.proposal.get('checkpoint') is not None
     use_prior = config.get('prior') is not None
-    use_truncation = use_proposal and use_prior
 
     print(f"[Mode] Use proposal: {use_proposal}")
     print(f"[Mode] Use prior: {use_prior}")
@@ -513,51 +512,47 @@ def main(config: ml_collections.ConfigDict):
     print(f"\n[Sampling] Generating {num_samples} parameter samples...")
 
     if use_proposal:
-        # Sample from proposal
-        samples = sample_from_proposal(
-            proposal_model,
-            observation,
-            num_samples=num_samples,
-            batch_size=config.proposal.get('batch_size', 100),
-            device=device
-        )
+        # Sample from proposal with truncation if needed
+        samples = []
+        total_generated = 0
 
-        # Denormalize
-        if norm_dict is not None:
-            samples = denormalize_samples(samples, norm_dict)
+        while len(samples) < num_samples:
+            # Determine batch size for this iteration
+            remaining = num_samples - len(samples)
+            current_batch = min(remaining * 2, config.proposal.get('batch_size', 100))
 
-        # Apply truncation if prior is given
-        if use_truncation:
-            print("[Truncation] Applying prior bounds to truncate proposal samples...")
-            within_bounds = prior.is_within_bounds(samples)
-            num_truncated = np.sum(~within_bounds)
-            print(f"[Truncation] Rejected {num_truncated}/{num_samples} samples outside prior bounds")
+            # Sample from proposal
+            batch_samples = sample_from_proposal(
+                proposal_model,
+                observation,
+                num_samples=current_batch,
+                batch_size=config.proposal.get('batch_size', 100),
+                device=device
+            )
+            total_generated += current_batch
 
-            # Keep only samples within bounds
-            samples = samples[within_bounds]
+            # Denormalize
+            if norm_dict is not None:
+                batch_samples = denormalize_samples(batch_samples, norm_dict)
 
-            if len(samples) == 0:
-                raise RuntimeError("All proposal samples were outside prior bounds")
+            # Apply truncation if prior is given
+            if use_prior:
+                within_bounds = prior.is_within_bounds(batch_samples)
+                acceptance_fraction = np.sum(within_bounds) / len(batch_samples)
+                print(f"[Truncation] Batch acceptance fraction: {acceptance_fraction:.3f} "
+                      f"({np.sum(within_bounds)}/{len(batch_samples)} samples)")
+                batch_samples = batch_samples[within_bounds]
 
-            # Resample if needed to reach num_samples
-            while len(samples) < num_samples:
-                print(f"[Truncation] Resampling to reach {num_samples} samples...")
-                new_samples = sample_from_proposal(
-                    proposal_model,
-                    observation,
-                    num_samples=num_samples - len(samples),
-                    batch_size=config.proposal.get('batch_size', 100),
-                    device=device
-                )
+            samples.append(batch_samples)
 
-                if norm_dict is not None:
-                    new_samples = denormalize_samples(new_samples, norm_dict)
+        # Concatenate and trim to exact number
+        samples = np.concatenate(samples, axis=0)[:num_samples]
 
-                within_bounds = prior.is_within_bounds(new_samples)
-                samples = np.concatenate([samples, new_samples[within_bounds]], axis=0)
-
-            # Trim to exact number
-            samples = samples[:num_samples]
+        # Print acceptance statistics
+        if use_prior:
+            acceptance_fraction = len(samples) / total_generated
+            print(f"[Truncation] Acceptance fraction: {acceptance_fraction:.3f} "
+                  f"({len(samples)}/{total_generated} samples)")
 
     elif use_prior:
         # Sample from prior only
