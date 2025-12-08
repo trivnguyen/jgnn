@@ -148,8 +148,9 @@ class NPEVisualizationCallback(pl.Callback):
             y = median_posterior[:, i]
             yerr = [(median_posterior[:, i] - p68_lower[:, i]),
                     (p68_upper[:, i] - median_posterior[:, i])]
-            ax.errorbar(x, y, yerr=yerr, fmt='o', alpha=0.3, markersize=10,
-                        ecolor='gray', capsize=2)
+            ax.errorbar(
+                x, y, yerr=yerr, fmt='o', alpha=0.3, markersize=2,
+                capsize=1)
 
             # 1:1 line
             min_val = min(true_params[:, i].min(), median_posterior[:, i].min())
