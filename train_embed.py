@@ -205,14 +205,15 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         resume="allow",
     )
 
-    # Build pre-transforms (will be passed to NPE, not embedding_nn)
-    print("[Transforms] Building pre-transforms...")
-    pre_transforms = build_transformation(**config.pre_transforms)
-
     # Prepare data
     print("[Data] Loading datasets...")
     train_loader, val_loader, norm_dict = prepare_data(config)
     print(f"[Data] Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
+
+    # Build pre-transforms
+    print("[Transforms] Building pre-transforms...")
+    pre_transforms = build_transformation(
+        norm_dict=norm_dict, **config.pre_transforms)
 
     # Create model
     print("[Model] Creating GNN embedding model...")
