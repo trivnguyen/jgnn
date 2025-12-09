@@ -4,13 +4,6 @@ This script generates parameter samples from a prior distribution and/or a train
 proposal (SNPE) model, then simulates stellar kinematics for dwarf galaxies.
 
 Usage:
-    # Sample from prior only
-    python run_simulations.py --config=configs/sim_config.py
-
-    # Sample from proposal (requires observation data)
-    python run_simulations.py --config=configs/sim_config.py
-
-    # Sample from proposal with prior truncation
     python run_simulations.py --config=configs/sim_config.py
 """
 import os
