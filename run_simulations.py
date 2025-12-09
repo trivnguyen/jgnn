@@ -10,7 +10,7 @@ import os
 import sys
 from pathlib import Path
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
+
 
 import yaml
 import numpy as np
@@ -198,7 +198,7 @@ def sample_num_stars(config: ml_collections.ConfigDict, num_samples: int):
             size=num_samples
         )
     elif config.simulation.num_stars_dist == 'delta':
-        return = np.full(num_samples, config.simulation.num_stars_value)
+        return np.full(num_samples, config.simulation.num_stars_value)
     else:
         raise ValueError(f"Unknown num_stars_dist: {config.simulation.num_stars_dist}")
 
