@@ -22,7 +22,7 @@ from ml_collections import config_flags
 import ml_collections
 
 import datasets
-from jgnn.models import SequentialNPE
+from jgnn.models import SequentialNPE, GNNEmbedding, TransformerEmbedding
 from jgnn.priors import BoxUniform
 from jgnn.sims import (
     run_simulation_batch,
@@ -33,7 +33,41 @@ from jgnn.sims import (
 )
 
 
-def load_proposal_from_checkpoint(checkpoint_path: str):
+def create_embedding_network(config: ml_collections.ConfigDict):
+    """Create a new embedding network.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        Embedding network instance
+    """
+    model_type = config.model.embedding.get('type', 'gnn')
+    if model_type == 'gnn':
+        print("[Model] Creating GNN Embedding model...")
+        return GNNEmbedding(
+            input_size=config.model.input_size,
+            gnn_args=config.model.embedding.gnn,
+            mlp_args=config.model.embedding.mlp,
+            loss_type=config.model.embedding.get('loss_type', 'mse'),
+            loss_args=config.model.embedding.get('loss_args', None),
+            conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
+        )
+    elif model_type == 'transformer':
+        print("[Model] Creating Transformer Embedding model...")
+        return TransformerEmbedding(
+            input_size=config.model.input_size,
+            transformer_args=config.model.embedding.transformer,
+            loss_type=config.model.embedding.get('loss_type', 'mse'),
+            loss_args=config.model.embedding.get('loss_args', None),
+            mlp_args=config.model.embedding.get('mlp', None),
+        )
+    else:
+        raise ValueError(f"Unsupported embedding model type: {config.model.type}")
+
+
+def load_proposal_from_checkpoint(
+    checkpoint_path: str, config: ml_collections.ConfigDict = None):
     """Load SequentialNPE proposal model from checkpoint.
 
     Parameters
@@ -52,25 +86,36 @@ def load_proposal_from_checkpoint(checkpoint_path: str):
     """
     print(f"[Proposal] Loading proposal model from: {checkpoint_path}")
 
-    # Load full SequentialNPE model from checkpoint
-    model = SequentialNPE.load_from_checkpoint(checkpoint_path)
-    model.eval()
+    # Create new embedding network
+    print("[Model] Creating new embedding network...")
+    embedding_nn = create_embedding_network(config)
 
-    # Extract hyperparameters
+    # Create SNPE model
+    print("[Model] Creating SNPE model...")
+    model = SequentialNPE(
+        input_size=config.model.input_size,
+        output_size=config.model.output_size,
+        flows_args=config.model.flows,
+        embedding_nn=embedding_nn,
+        optimizer_args=config.optimizer,
+        scheduler_args=config.scheduler,
+        norm_dict=norm_dict,
+        pre_transforms=pre_transforms,
+    )
+
+    # Load checkpoint and hyperparameters
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     hparams = checkpoint['hyper_parameters']
     norm_dict = hparams.get('norm_dict')
 
-    # Get labels from norm_dict or checkpoint
-    labels = None
-    if norm_dict is not None and 'labels' in norm_dict:
-        labels = norm_dict['labels']
+    # Load model state
+    model.load_state_dict(checkpoint['state_dict'])
+    model.eval()
 
     print(f"[Proposal] Model loaded successfully")
     print(f"[Proposal] Output size: {model.output_size}")
-    print(f"[Proposal] Labels: {labels}")
 
-    return model, norm_dict, labels
+    return model, norm_dict
 
 
 def sample_from_proposal(
@@ -138,6 +183,26 @@ def sample_from_proposal(
     return all_samples
 
 
+def sample_num_stars(config: ml_collections.ConfigDict, num_samples: int):
+    """Sample number of stars per galaxy based on configuration. """
+
+    if config.simulation.num_stars_dist == 'poisson':
+        return np.random.poisson(
+            config.simulation.num_stars_mean,
+            size=num_samples
+        )
+    elif config.simulation.num_stars_dist == 'uniform':
+        return np.random.randint(
+            config.simulation.num_stars_min,
+            config.simulation.num_stars_max,
+            size=num_samples
+        )
+    elif config.simulation.num_stars_dist == 'delta':
+        return = np.full(num_samples, config.simulation.num_stars_value)
+    else:
+        raise ValueError(f"Unknown num_stars_dist: {config.simulation.num_stars_dist}")
+
+
 def denormalize_samples(samples, norm_dict):
     """Denormalize samples back to original scale.
 
@@ -190,13 +255,12 @@ def main(config: ml_collections.ConfigDict):
     # Load proposal if specified
     proposal_model = None
     norm_dict = None
-    labels = None
 
     if use_proposal:
         if config.get('observation') is None or config.observation.get('path') is None:
             raise ValueError("Observation data is required when using proposal model")
 
-        proposal_model, norm_dict, labels = load_proposal_from_checkpoint(
+        proposal_model, norm_dict = load_proposal_from_checkpoint(
             config.proposal.checkpoint
         )
 
@@ -216,10 +280,6 @@ def main(config: ml_collections.ConfigDict):
         print("[Prior] Initializing BoxUniform prior")
         prior = BoxUniform(config.prior)
         print(f"[Prior] {prior}")
-
-        # If labels not set from proposal, get from prior
-        if labels is None:
-            labels = prior.labels
 
     # Sample parameters
     num_samples = config.simulation.num_galaxies
@@ -289,59 +349,26 @@ def main(config: ml_collections.ConfigDict):
         stellar_params_default=config.simulation.get('stellar_params_default', {}),
         df_params_default=config.simulation.get('df_params_default', {}),
     )
-
-    # Sample number of stars per galaxy
-    if config.simulation.num_stars_dist == 'poisson':
-        num_stars_list = np.random.poisson(
-            config.simulation.num_stars_mean,
-            size=num_samples
-        )
-    elif config.simulation.num_stars_dist == 'uniform':
-        num_stars_list = np.random.randint(
-            config.simulation.num_stars_min,
-            config.simulation.num_stars_max,
-            size=num_samples
-        )
-    elif config.simulation.num_stars_dist == 'delta':
-        num_stars_list = np.full(num_samples, config.simulation.num_stars_value)
-    else:
-        raise ValueError(f"Unknown num_stars_dist: {config.simulation.num_stars_dist}")
+    num_stars_list = sample_num_stars(config, num_samples)
 
     print(f"[Sampling] Sampled number of stars: mean={num_stars_list.mean():.1f}, std={num_stars_list.std():.1f}")
 
-    # Run simulations
+    # Run simulations and preprocess
     node_features, graph_features = run_simulation_batch(
         params_list,
         num_stars_list,
         max_iter=config.simulation.get('max_iter', 1000)
     )
 
-    # Preprocess simulations
     print("\n[Preprocessing] Applying preprocessing transformations...")
-    preprocess_config = config.get('preprocess', ml_collections.ConfigDict())
-
-    node_features, graph_features = preprocess(
-        node_features,
-        graph_features,
-        vrange=preprocess_config.get('vrange', (0, np.inf)),
-        vdisp_range=preprocess_config.get('vdisp_range', (0, np.inf)),
-        r_range=preprocess_config.get('r_range', (0, np.inf)),
-        r_rstar_range=preprocess_config.get('r_rstar_range', (0, np.inf)),
-        apply_projection=preprocess_config.get('apply_projection', True),
-        projection_axis=preprocess_config.get('projection_axis', None),
-        use_proper_motions=preprocess_config.get('use_proper_motions', False),
-        norm_rstar=preprocess_config.get('norm_rstar', False),
-        seed=config.get('seed'),
-    )
-
-    num_stars = graph_features['num_stars']
-    print(f"[Preprocessing] Kept {len(num_stars)} galaxies after preprocessing")
+    node_features, graph_features = preprocess_simulation(
+        node_features, graph_features, **config.preprocess)
 
     # Save preprocessed results
     metadata = {
         'use_proposal': use_proposal,
         'use_prior': use_prior,
-        'num_galaxies': len(num_stars),
+        'num_galaxies': len(graph_features['num_stars']),
         'dm_type': config.simulation.dm_type,
         'stellar_type': config.simulation.stellar_type,
         'df_type': config.simulation.df_type,
