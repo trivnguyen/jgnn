@@ -13,7 +13,7 @@ from .simulator import (
 )
 from .preprocessing import (
     samples_to_simulation_params,
-    preprocess,
+    preprocess_simulations,
 )
 from .io import (
     write_graph_dataset,
@@ -25,7 +25,7 @@ __all__ = [
     'run_simulation',
     'run_simulation_batch',
     'samples_to_simulation_params',
-    'preprocess',
+    'preprocess_simulations',
     'write_graph_dataset',
     'read_graph_dataset',
     'load_observation',
