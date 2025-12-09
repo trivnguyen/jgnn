@@ -1,116 +1,12 @@
+"""File I/O operations for simulation data."""
 
 import h5py
 import numpy as np
 
-def get_graph(node_features, graph_features, idx):
-    """ Get a graph from the dataset given the index """
-    nodes = {}
-    for k, v in node_features.items():
-        nodes[k] = v[idx]
-    graph = {}
-    for k, v in graph_features.items():
-        graph[k] = v[idx]
-    return nodes, graph
 
-def random_rotation_matrix():
-    # Generate a random quaternion
-    q = np.random.randn(4)
-    q /= np.linalg.norm(q)  # Normalize the quaternion
-
-    # Convert quaternion to rotation matrix
-    q0, q1, q2, q3 = q
-    R = np.array([
-        [1 - 2*q2**2 - 2*q3**2, 2*q1*q2 - 2*q3*q0, 2*q1*q3 + 2*q2*q0],
-        [2*q1*q2 + 2*q3*q0, 1 - 2*q1**2 - 2*q3**2, 2*q2*q3 - 2*q1*q0],
-        [2*q1*q3 - 2*q2*q0, 2*q2*q3 + 2*q1*q0, 1 - 2*q1**2 - 2*q2**2]
-    ])
-    return R
-
-def project2d(pos, vel, axis=0, use_proper_motions=False):
-    """ Project the 3D positions and velocities to 2D.
-    Return the 2d positions and line-of-sight velocities.
-
-    Parameters
-    ----------
-    pos : array_like
-        3D positions shape (N, 3)
-    vel : array_like
-        3D velocities shape (N, 3)
-    axis : int or str
-        The LOS Axis to project to (0, 1, or 2). If None, apply a random projection.
-    use_proper_motions : bool
-        Whether to include proper motions in the velocities
-
-    Returns
-    -------
-    pos_proj : array_like
-        2D positions
-    vel_proj: array_like
-        Line-of-sight velocities
-    """
-    # if axis is 'random', apply a random projection
-    # by randomly rotate the 3D positions and velocities
-    if axis is None:
-        R = random_rotation_matrix()
-        pos = np.dot(pos, R)
-        vel = np.dot(vel, R)
-        axis = np.random.randint(3)
-    # project to 2D
-    pos_proj = np.delete(pos, axis, axis=1)
-
-    if use_proper_motions:
-        return pos_proj, vel
-    else:
-        return pos_proj, vel[:, axis]
-
-def parse_graph_features(graph_features, norm_rstar=False):
-    """ Parse graph features into training target """
-
-    # create a copy of the graph features
-    new_graph_features = graph_features.copy()
-
-    # parse DM parameters
-    new_graph_features['dm_log_r_dm'] = np.log10(graph_features['dm_r_dm'])
-    new_graph_features['dm_log_rho_0'] = np.log10(graph_features['dm_rho_0'])
-
-    # parse stellar parameters
-    if graph_features.get('stellar_r_star') is not None:
-        new_graph_features['stellar_log_r_star'] = np.log10(
-            graph_features['stellar_r_star'])
-    elif graph_features.get('stellar_r_star_r_dm') is not None:
-        new_graph_features['stellar_log_r_star'] = (
-            np.log10(graph_features['stellar_r_star_r_dm'])
-            + new_graph_features['dm_log_r_dm'])
-    else:
-        raise ValueError('Cannot find stellar radius')
-
-    # parse DF parameters
-    if graph_features.get('df_r_a') is not None:
-        new_graph_features['df_log_r_a'] = np.log10(graph_features['df_r_a'])
-    elif graph_features.get('df_r_a_r_dm') is not None:
-        new_graph_features['df_log_r_a'] = (
-            np.log10(graph_features['df_r_a_r_dm'])
-            + new_graph_features['dm_log_r_dm'])
-    elif graph_features.get('df_r_a_r_star') is not None:
-        new_graph_features['df_log_r_a'] = (
-            np.log10(graph_features['df_r_a_r_star'])
-            + new_graph_features['stellar_log_r_star'])
-    else:
-        raise ValueError('Cannot find DF scale radius')
-
-    # normalize by the stellar radius
-    if norm_rstar:
-        for k in ['dm_log_r_dm', 'df_log_r_a', ]:
-            new_graph_features[k] -= new_graph_features['stellar_log_r_star']
-        new_graph_features['dm_log_rho_0'] -= (
-            new_graph_features['stellar_log_r_star'] * 3)
-    return new_graph_features
-
-
-### IO functions ###
 def write_graph_dataset(
         path, node_features, graph_features, lengths, headers=None):
-    """ Write a graph dataset with node features and graph features into HDF5
+    """Write a graph dataset with node features and graph features into HDF5
     file. The node features of all graphs are concatenated into a single
     array. The lengths of each graph is required to split the node features
     into individual graphs.
@@ -175,8 +71,9 @@ def write_graph_dataset(
         # write headers
         f.attrs.update(headers)
 
+
 def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
-    """ Read graph dataset from path and return node features, graph
+    """Read graph dataset from path and return node features, graph
     features, and headers.
 
     Parameters
@@ -224,7 +121,7 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
         for key in headers['node_features']:
             if key in features_list:
                 if f.get(key) is None:
-                    logger.warning(f"Feature {key} not found in {path}")
+                    # Note: logger not imported, so skip warning
                     continue
                 if concat:
                     node_features[key] = f[key][:]
@@ -236,7 +133,7 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
         for key in headers['graph_features']:
             if key in features_list:
                 if f.get(key) is None:
-                    logger.warning(f"Feature {key} not found in {path}")
+                    # Note: logger not imported, so skip warning
                     continue
                 graph_features[key] = f[key][:]
 
@@ -245,3 +142,67 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
         node_features = {
             p: np.array(v, dtype='object') for p, v in node_features.items()}
     return node_features, graph_features, headers
+
+
+def load_observation(observation_path: str, model, norm_dict: dict = None):
+    """Load and preprocess observation data for proposal conditioning.
+
+    Parameters
+    ----------
+    observation_path : str
+        Path to observation HDF5 file
+    model : SequentialNPE
+        SequentialNPE model (used to apply pre-transforms)
+    norm_dict : dict, optional
+        Normalization dictionary
+
+    Returns
+    -------
+    observation_batch : PyG Data object
+        Preprocessed observation ready for conditioning
+    """
+    import torch
+    from torch_geometric.data import Batch
+
+    # Import here to avoid circular imports
+    import datasets
+    from datasets.preprocess import create_graph_from_posvel
+
+    print(f"[Observation] Loading observation from: {observation_path}")
+
+    # Read observation
+    node_feats, graph_feats, headers = read_graph_dataset(
+        observation_path, concat=False, to_array=True
+    )
+
+    # Get the first (and should be only) graph
+    pos = node_feats['pos'][0]
+    vel = node_feats['vel'][0]
+    vel_error = node_feats.get('vel_error', [None])[0]
+
+    # Create a dummy label (will not be used)
+    dummy_label = [0.0] * model.output_size
+
+    # Get conditioning if it exists
+    if 'cond' in graph_feats:
+        cond = graph_feats['cond'][0]
+    else:
+        cond = None
+
+    # Create graph
+    graph = create_graph_from_posvel(
+        pos, vel, vel_error=vel_error, label=dummy_label, cond=cond
+    )
+
+    # Normalize if norm_dict is provided
+    if norm_dict is not None:
+        theta_loc = torch.tensor(norm_dict['theta_loc'], dtype=torch.float32)
+        theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32)
+        graph.theta = (graph.theta - theta_loc) / theta_scale
+
+    # Create batch
+    observation_batch = Batch.from_data_list([graph])
+
+    print(f"[Observation] Observation loaded: {pos.shape[0]} stars")
+
+    return observation_batch

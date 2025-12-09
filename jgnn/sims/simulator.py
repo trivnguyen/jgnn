@@ -1,11 +1,10 @@
-"""
-Core simulation functionality for generating dwarf galaxy stellar kinematics.
-"""
-from typing import Dict, Tuple, Optional
+"""Core simulation functionality for generating dwarf galaxy stellar kinematics."""
 
+from typing import Dict, Tuple, List
 import warnings
 import numpy as np
 import astropy.units as u
+from tqdm import tqdm
 
 # Optional agama import with graceful error handling
 _AGAMA_AVAILABLE = False
@@ -23,8 +22,6 @@ except ImportError as e:
         f"Original error: {_AGAMA_IMPORT_ERROR}"
     )
     agama = None
-
-from . import utils
 
 # agama sometimes fails to sample (not sure why), so we allow multiple attempts
 # Maximum iterations for sampling before giving up
@@ -44,8 +41,7 @@ def _check_agama():
 
 def _parse_parameters(
     dm_params: Dict, stellar_params: Dict, df_params: Dict) -> Tuple[Dict, Dict, Dict]:
-    """
-    Parse simplified parameter names into AGAMA-compatible format.
+    """Parse simplified parameter names into AGAMA-compatible format.
 
     This handles conversion of user-friendly parameter names to AGAMA conventions
     and resolves relative parameter specifications (e.g., r_star_r_dm).
@@ -118,8 +114,7 @@ def create_galaxy_model(
     dm_type: str, stellar_type: str, df_type: str,
     dm_params: Dict, stellar_params: Dict, df_params: Dict
 ):
-    """
-    Create an AGAMA galaxy model from parsed parameters.
+    """Create an AGAMA galaxy model from parsed parameters.
 
     Parameters
     ----------
@@ -159,8 +154,7 @@ def create_galaxy_model(
 
 def run_simulation(
     params: Dict, num_stars: int, max_iter: int = N_MAX_ITER) -> Tuple[Dict, Dict]:
-    """
-    Simulate stellar kinematics for a single dwarf galaxy.
+    """Simulate stellar kinematics for a single dwarf galaxy.
 
     This is the main interface for generating mock galaxy data. It takes
     physical parameters describing the galaxy's dark matter halo, stellar
@@ -209,7 +203,7 @@ def run_simulation(
     ...     'stellar_params': {'r_star': 0.3},
     ...     'df_params': {'r_a': 0.5}
     ... }
-    >>> node_features, graph_features = simulator(params, num_stars=1000)
+    >>> node_features, graph_features = run_simulation(params, num_stars=1000)
     """
     _check_agama()
 
@@ -268,142 +262,86 @@ def run_simulation(
 
     return node_features, graph_features
 
-def preprocess(
-    node_features: Dict,
-    graph_features: Dict,
-    vrange: Tuple[float, float] = (0, np.inf),
-    vdisp_range: Tuple[float, float] = (0, np.inf),
-    r_range: Tuple[float, float] = (0, np.inf),
-    r_rstar_range: Tuple[float, float] = (0, np.inf),
-    apply_projection: bool = True,
-    projection_axis: Optional[int] = None,
-    use_proper_motions: bool = False,
-    norm_rstar: bool = False,
-    seed: Optional[int] = None,
-    verbose: bool = False,
+
+def run_simulation_batch(
+    params_list: List[Dict], num_stars_list: List[int], max_iter: int = N_MAX_ITER
 ) -> Tuple[Dict, Dict]:
-    """ Preprocess the raw simulation data into training data. Applies
-    velocity cuts, projects to 2D, and selects stars within radius range.
+    """Run simulations for a batch of galaxies.
 
     Parameters
     ----------
-    node_features : dict
-        Raw node features with keys 'pos' and 'vel', as given by simulator().
-    graph_features : dict
-        Raw graph features as given by simulator().
-    vrange : tuple of float
-        Velocity range for star selection.
-    vdisp_range : tuple of float
-        Velocity dispersion range for star selection.
-    r_range : tuple of float
-        Radius range in kpc for star selection. If `apply_projection` is True,
-        applied on projected radius. Applied in addition to r_rstar_range.
-    r_rstar_range : tuple of float
-        Radius range in units of stellar rstar for star selection. If `apply_projection`
-        is True, applied on projected radius. Applied in addition to r_range.
-    apply_projection : bool
-        Whether to apply 2D projection.
-    projection_axis : int, optional
-        Axis to project onto (if `apply_projection` is True). If None, random projection is applied.
-        Default is None.
-    use_proper_motions : bool
-        Whether to include proper motions in the velocities.
-    norm_rstar : bool
-        Whether to normalize positions by stellar rstar.
-    seed : int, optional
-        Random seed for reproducibility.
-    verbose : bool
-        Whether to print verbose messages.
+    params_list : list of dict
+        List of galaxy parameter dictionaries (see run_simulation)
+    num_stars_list : list of int
+        List of number of stars to sample for each galaxy
+    max_iter : int, optional
+        Maximum number of sampling attempts per galaxy (default: 1000)
 
     Returns
     -------
-    new_node_features : dict
-        Processed node features with keys 'pos', 'vel', 'vel_true', 'vel_error'.
-    new_graph_features : dict
-        Processed graph features with added 'num_stars' and parsed labels.
+    node_features : dict
+        Dictionary with keys:
+        - 'pos' : list of ndarray - 3D positions for each galaxy
+        - 'vel' : list of ndarray - 3D velocities for each galaxy
+    graph_features : dict
+        Dictionary containing all input parameters with prefixed names
+        (dm_*, stellar_*, df_*), each as an ndarray of shape (num_galaxies,)
+
+    Raises
+    ------
+    RuntimeError
+        If all simulations fail, an error is raised.
     """
 
-    np.random.seed(seed)
+    num_galaxies = len(params_list)
+    all_pos = []
+    all_vel = []
+    graph_feat_lists = {key: [] for key in []}
+    successful_sims = []
 
-    num_galaxies  = len(node_features['pos'])
-    new_node_features = {
-        'pos': [],
-        'vel': [],
-        'vel_true': [],
-        'vel_error': [],
+    print(f"[Simulations] Running {num_galaxies} simulations...")
+
+    for i in tqdm(range(num_galaxies), desc="Simulating galaxies"):
+        try:
+            node_feat, graph_feat = run_simulation(
+                params_list[i],
+                num_stars_list[i],
+                max_iter=max_iter
+            )
+
+            all_pos.append(node_feat['pos'])
+            all_vel.append(node_feat['vel'])
+
+            # Initialize graph feature lists on first success
+            if len(graph_feat_lists) == 0:
+                graph_feat_lists = {key: [] for key in graph_feat.keys()}
+
+            # Append graph features
+            for key in graph_feat.keys():
+                graph_feat_lists[key].append(graph_feat[key])
+
+            successful_sims.append(i)
+
+        except Exception as e:
+            warnings.warn(
+                f"Simulation {i} failed after {max_iter} attempts. Error: {str(e)}"
+            )
+            continue
+
+    # Combine results
+    if len(successful_sims) == 0:
+        raise RuntimeError("All simulations failed")
+
+    print(f"[Simulations] Completed {len(successful_sims)}/{num_galaxies} simulations successfully")
+
+    # Return node features as lists (not concatenated) for preprocessing
+    node_features = {
+        'pos': all_pos,
+        'vel': all_vel,
     }
-    new_graph_features = {k: [] for k in graph_features.keys()}
-    new_graph_features['cond'] = []
-    new_graph_features['num_stars'] = []
 
-    for i in range(num_galaxies):
-        nodes, graph = utils.get_graph(node_features, graph_features, i)
-        pos = nodes['pos'].astype(np.float32)
-        vel = nodes['vel'].astype(np.float32)
-        stellar_rstar = graph['stellar_r_star_r_dm'] * graph['dm_r_dm']
+    graph_features = {
+        key: np.array(values) for key, values in graph_feat_lists.items()
+    }
 
-        # apply velocity cut on the 3d velocity
-        # large velocity can be due to AGAMA sampling issues
-        vel3d = np.linalg.norm(vel, axis=1)
-        mask = (vel3d > vrange[0]) & (vel3d < vrange[1])
-        if np.sum(mask) < int(len(pos) * 0.5):
-            # if half of the stars are outside the velocity range, skip this galaxy
-            if verbose:
-                print(f'Skipping galaxy {i} due to 3D velocity cut')
-            continue
-        pos = pos[mask]
-        vel = vel[mask]
-
-        # apply velocity dispersion cut on the 3d velocity dispersion
-        vdisp = np.std(vel, axis=0)
-        vdisp = np.linalg.norm(vdisp)
-        if vdisp < vdisp_range[0] or vdisp > vdisp_range[1]:
-            if verbose:
-                print(f'Skipping galaxy {i} due to velocity dispersion cut')
-            continue
-
-        # project onto 2D plane
-        if apply_projection:
-            pos, vel = utils.project2d(
-                pos, vel, axis=projection_axis, use_proper_motions=use_proper_motions)
-
-        # apply radius cut
-        min_radius = max(r_rstar_range[0] * stellar_rstar, r_range[0])
-        max_radius = min(r_rstar_range[1] * stellar_rstar, r_range[1])
-        radius = np.linalg.norm(pos, axis=1)
-        mask = (radius > min_radius) & (radius < max_radius)
-
-        if np.sum(mask) < int(len(pos) * 0.5):
-            # if half of the stars are outside the radius range, skip this galaxy
-            print(f'Skipping galaxy {i} due to radius cut')
-            continue
-
-        pos = pos[mask]
-        vel = vel[mask]
-        radius = radius[mask]
-
-        if norm_rstar:
-            pos = pos / stellar_rstar
-
-        new_node_features['pos'].append(pos)
-        new_node_features['vel'].append(vel)
-        new_node_features['vel_true'].append(vel)
-        new_node_features['vel_error'].append(np.zeros_like(vel))
-
-        for k in graph.keys():
-            new_graph_features[k].append(graph[k])
-        new_graph_features['num_stars'].append(len(pos))
-        new_graph_features['cond'].append(np.log10(stellar_rstar))
-
-    # Finalize node and graph features
-    if len(new_node_features['pos']) == 0:
-        raise ValueError("All galaxies were filtered out during preprocessing")
-
-    for k in new_node_features.keys():
-        new_node_features[k] = np.concatenate(new_node_features[k])
-    for k in new_graph_features.keys():
-        new_graph_features[k] = np.array(new_graph_features[k])
-    new_graph_features = utils.parse_graph_features(
-        new_graph_features, norm_rstar=norm_rstar)
-
-    return new_node_features, new_graph_features
+    return node_features, graph_features
