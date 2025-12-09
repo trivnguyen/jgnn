@@ -142,7 +142,7 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
         norm_dict = None
 
     # Create dataloaders with existing norm_dict
-    train_loader, val_loader, _ = datasets.prepare_dataloaders(
+    train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
         node_feats,
         graph_feats,
         config.labels,
@@ -328,6 +328,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
+        id=config.get("id", None),
         save_dir=str(run_dir),
         log_model="all",
         config=config.to_dict(),
