@@ -1,6 +1,7 @@
 """Neural Posterior Estimation (NPE) module for graph-based inference."""
 
 from typing import Dict, Any
+import copy
 
 import torch
 import torch.nn as nn
@@ -18,6 +19,29 @@ class NPE(pl.LightningModule):
     to perform posterior estimation on graph-structured data.
     The embedding network is initialized externally and passed to the model,
     allowing for flexible architecture choices (e.g., GNN, Transformer, etc.).
+
+    Parameters
+    ----------
+    input_size : int
+        Size of input features
+    output_size : int
+        Size of output (target) features
+    flows_args : ConfigDict
+        Configuration for building the flow (num_transforms, hidden_features, etc.)
+    embedding_nn : nn.Module, optional
+        Pre-built embedding network. If None, uses Identity mapping.
+    optimizer_args : ConfigDict, optional
+        Optimizer configuration
+    scheduler_args : ConfigDict, optional
+        Scheduler configuration
+    norm_dict : Dict[str, Any], optional
+        Normalization dictionary for data preprocessing
+    pre_transforms : optional
+        Data transformations to apply before forward pass
+    init_flows_from_embedding : bool, default=False
+        If True and embedding_nn has a 'flow' attribute, initialize NPE.flows
+        from embedding_nn.flow. The flows will be deep-copied and gradients
+        will be enabled even if embedding_nn is frozen.
     """
     def __init__(
         self,
@@ -29,6 +53,7 @@ class NPE(pl.LightningModule):
         scheduler_args: ConfigDict=None,
         norm_dict: Dict[str, Any]=None,
         pre_transforms=None,
+        init_flows_from_embedding: bool=False,
     ):
         super().__init__()
         self.input_size = input_size
@@ -39,6 +64,7 @@ class NPE(pl.LightningModule):
         self.optimizer_args = optimizer_args or {}
         self.scheduler_args = scheduler_args or {}
         self.norm_dict = norm_dict
+        self.init_flows_from_embedding = init_flows_from_embedding
 
         self.save_hyperparameters(
             ignore=['embedding_nn', 'pre_transforms'])
@@ -55,30 +81,50 @@ class NPE(pl.LightningModule):
         else:
             embedding_output_size = self.embedding_nn.output_size
 
-        # create the flow
-        features = self.output_size
-        context_features = embedding_output_size
-        num_transforms = self.flows_args.get('num_transforms', 4)
-        hidden_features = self.flows_args.get('hidden_features', [32, 32])
-        num_bins = self.flows_args.get('num_bins', 8)
-        activation_name = self.flows_args.get('activation', 'tanh')
-        activation_args = self.flows_args.get('activation_args', None)
-        randperm = self.flows_args.get('randperm', True)
+        # Check if we should initialize flows from embedding_nn.flow
+        if (
+            self.init_flows_from_embedding
+            and hasattr(self.embedding_nn, "flow")
+            and self.embedding_nn.flow is not None
+        ):
+            print("[NPE] Initializing flows from embedding_nn.flow")
+            # Create a copy of the embedding flow to avoid sharing parameters
+            self.flows = copy.deepcopy(self.embedding_nn.flow)
 
-        # Get activation function
-        activation_fn = get_activation(
-            activation_name, activation_args, return_instance=False)
+            # Ensure all parameters in flows have gradients enabled
+            # even if the embedding_nn was frozen
+            for param in self.flows.parameters():
+                param.requires_grad = True
 
-        # Build the flow
-        self.flows = build_flows(
-            features=features,
-            context_features=context_features,
-            num_transforms=num_transforms,
-            hidden_features=hidden_features,
-            num_bins=num_bins,
-            activation=activation_fn,
-            randperm=randperm
-        )
+            print(f"[NPE] Flows initialized from embedding with"
+                  f" {sum(p.numel() for p in self.flows.parameters()):,} parameters")
+        else:
+            # create the flow from scratch
+            features = self.output_size
+            context_features = embedding_output_size
+            num_transforms = self.flows_args.get('num_transforms', 4)
+            hidden_features = self.flows_args.get('hidden_features', [32, 32])
+            num_bins = self.flows_args.get('num_bins', 8)
+            activation_name = self.flows_args.get('activation', 'tanh')
+            activation_args = self.flows_args.get('activation_args', None)
+            randperm = self.flows_args.get('randperm', True)
+
+            # Get activation function
+            activation_fn = get_activation(
+                activation_name, activation_args, return_instance=False)
+
+            # Build the flow
+            self.flows = build_flows(
+                features=features,
+                context_features=context_features,
+                num_transforms=num_transforms,
+                hidden_features=hidden_features,
+                num_bins=num_bins,
+                activation=activation_fn,
+                randperm=randperm
+            )
+            print(f"[NPE] Flows built from scratch with"
+                  f" {sum(p.numel() for p in self.flows.parameters()):,} parameters")
 
     def forward(self, batch):
         """ Forward pass through the embedding network. """

@@ -231,6 +231,10 @@ def create_model(
     # Create NPE model
     # Note: pre_transforms goes to NPE, not embedding_nn
     print("[Model] Creating NPE model...")
+
+    # Check if we should initialize flows from embedding
+    init_flows_from_embedding = config.model.get('init_flows_from_embedding', False)
+
     model = NPE(
         input_size=config.model.input_size,
         output_size=config.model.output_size,
@@ -240,6 +244,7 @@ def create_model(
         scheduler_args=config.scheduler,
         norm_dict=norm_dict,
         pre_transforms=pre_transforms,
+        init_flows_from_embedding=init_flows_from_embedding,
     )
 
     return model
