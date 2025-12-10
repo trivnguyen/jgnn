@@ -21,7 +21,7 @@ from absl import flags
 from ml_collections import config_flags
 import ml_collections
 
-import datasets
+from jgnn import datasets
 from jgnn.models import SequentialNPE, GNNEmbedding, TransformerEmbedding
 from jgnn.priors import BoxUniform
 from jgnn.sims import (

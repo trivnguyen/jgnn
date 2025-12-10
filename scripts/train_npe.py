@@ -1,4 +1,4 @@
-"""Training script for the Neural Posterior Estimation embedding model."""
+"""Training script for Neural Posterior Estimation (NPE)."""
 
 import os
 import sys
@@ -21,9 +21,10 @@ import torch
 from absl import flags
 from ml_collections import config_flags
 
-import datasets
-from jgnn.models import GNNEmbedding, TransformerEmbedding
+from jgnn import datasets
+from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
 from jgnn.transforms import build_transformation
+from jgnn.callbacks.visualization import NPEVisualizationCallback
 
 
 def setup_workdir(workdir: str) -> Path:
@@ -37,6 +38,7 @@ def setup_workdir(workdir: str) -> Path:
     """
     run_dir = Path(workdir)
     run_dir.mkdir(parents=True, exist_ok=True)
+
     return run_dir
 
 
@@ -60,14 +62,67 @@ def get_checkpoint_path(config: ml_collections.ConfigDict, workdir: Path) -> str
     return str(workdir / 'lightning_logs' / 'checkpoints' / ckpt)
 
 
-def prepare_data(config: ml_collections.ConfigDict):
+def load_embedding_network(
+    config: ml_collections.ConfigDict, checkpoint_path: str, freeze: bool = False):
+    """Load a pre-trained embedding network from checkpoint.
+
+    Args:
+        config: Configuration dictionary
+        checkpoint_path: Path to checkpoint
+        freeze: If True, freeze all parameters of the embedding network
+
+    Returns:
+        Tuple of (embedding_network, norm_dict)
+        - embedding_network: The loaded GNNEmbedding model
+        - norm_dict: The normalization dictionary from the checkpoint (if available)
+    """
+    print(f"[Embedding] Loading pre-trained embedding network from: {checkpoint_path}")
+
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+
+    # Load the embedding model
+    if config.model.embedding.type == 'transformer':
+        print(f"[Embedding] Detected TransformerEmbedding model type")
+        embedding_nn = TransformerEmbedding.load_from_checkpoint(checkpoint_path)
+    elif config.model.embedding.type == 'gnn':
+        print(f"[Embedding] Detected GNNEmbedding model type")
+        embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
+    else:
+        raise ValueError(
+            f"Unsupported embedding model type: {config.model.embedding.type}")
+
+    # Extract norm_dict if available in the hyperparameters
+    norm_dict = None
+    if 'hyper_parameters' in checkpoint:
+        hparams = checkpoint['hyper_parameters']
+        if 'norm_dict' in hparams:
+            norm_dict = hparams['norm_dict']
+            print(f"[Embedding] Loaded norm_dict from embedding checkpoint")
+
+    # Freeze parameters if requested
+    if freeze:
+        for param in embedding_nn.parameters():
+            param.requires_grad = False
+        embedding_nn.eval()
+        print(f"[Embedding] Froze all parameters in embedding network")
+
+    print(f"[Embedding] Embedding network loaded successfully")
+    print(f"[Embedding] Output size: {embedding_nn.output_size}")
+
+    return embedding_nn, norm_dict
+
+
+def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
     """Load and prepare datasets with transformations.
 
     Args:
         config: Configuration dictionary
+        embedding_norm_dict: Optional norm_dict from embedding checkpoint.
+                           If provided, this will be used instead of computing from data.
 
     Returns:
-        Tuple of (train_loader, val_loader, pre_transforms)
+        Tuple of (train_loader, val_loader, norm_dict)
     """
     # Load datasets
     node_feats, graph_feats = datasets.read_datasets(
@@ -75,10 +130,18 @@ def prepare_data(config: ml_collections.ConfigDict):
         config.data_name,
         config.num_datasets,
         init=config.get('init', 0),
-        concat=True,
+        concat=True
     )
 
     # Create dataloaders
+    # If we have a norm_dict from embedding, we can reuse it or compute new one
+    if embedding_norm_dict is not None and config.get('reuse_embedding_norm_dict', True):
+        print("[Data] Reusing normalization dict from embedding checkpoint")
+        norm_dict = embedding_norm_dict
+    else:
+        norm_dict = None
+
+    # Create dataloaders with existing norm_dict
     train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
         node_feats,
         graph_feats,
@@ -89,55 +152,102 @@ def prepare_data(config: ml_collections.ConfigDict):
         train_frac=config.train_frac,
         num_workers=config.num_workers,
         seed=config.seed_data,
+        norm_dict=norm_dict
     )
 
     return train_loader, val_loader, norm_dict
 
 
+def create_embedding_network(config: ml_collections.ConfigDict):
+    """Create a new embedding network.
+
+    Args:
+        config: Configuration dictionary
+
+    Returns:
+        Embedding network instance
+    """
+    model_type = config.model.embedding.get('type', 'gnn')
+    if model_type == 'gnn':
+        print("[Model] Creating GNN Embedding model...")
+        return GNNEmbedding(
+            input_size=config.model.input_size,
+            gnn_args=config.model.embedding.gnn,
+            mlp_args=config.model.embedding.mlp,
+            loss_type=config.model.embedding.get('loss_type', 'mse'),
+            loss_args=config.model.embedding.get('loss_args', None),
+            conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
+            # NPE handles optimizer, scheduler, and pre_transforms
+            optimizer_args=None,
+            scheduler_args=None,
+            pre_transforms=None,
+        )
+    elif model_type == 'transformer':
+        print("[Model] Creating Transformer Embedding model...")
+        return TransformerEmbedding(
+            input_size=config.model.input_size,
+            transformer_args=config.model.embedding.transformer,
+            loss_type=config.model.embedding.get('loss_type', 'mse'),
+            loss_args=config.model.embedding.get('loss_args', None),
+            mlp_args=config.model.embedding.get('mlp', None),
+            optimizer_args=None,
+            scheduler_args=None,
+            pre_transforms=None,
+        )
+    else:
+        raise ValueError(f"Unsupported embedding model type: {config.model.type}")
+
 def create_model(
     config: ml_collections.ConfigDict,
     pre_transforms,
     norm_dict
-):
-    """Create the GNN embedding model.
+) -> NPE:
+    """Create the NPE model with optional pre-trained embedding network.
 
     Args:
         config: Configuration dictionary
-        pre_transforms: Pre-transformation pipeline
-        norm_dict: Normalization dictionary to pass to the model
+        pre_transforms: Pre-transformation pipeline (passed to NPE)
+        norm_dict: Normalization dictionary to pass to NPE
 
     Returns:
-        Embedding model instance
+        NPE model instance
     """
-    if config.model.type == 'gnn':
-        print("[Model] Creating GNN Embedding model...")
-        return GNNEmbedding(
-            input_size=config.model.input_size,
-            gnn_args=config.model.gnn,
-            mlp_args=config.model.mlp,
-            loss_type=config.model.loss_type,
-            loss_args=config.model.get('loss_args', None),
-            conditional_mlp_args=config.model.get('conditional_mlp', None),
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            pre_transforms=pre_transforms,
-            norm_dict=norm_dict,
-        )
-    elif config.model.type == 'transformer':
-        print("[Model] Creating Transformer Embedding model...")
-        return TransformerEmbedding(
-            input_size=config.model.input_size,
-            transformer_args=config.model.transformer,
-            loss_type=config.model.loss_type,
-            loss_args=config.model.get('loss_args', None),
-            mlp_args=config.model.get('mlp', None),
-            optimizer_args=config.optimizer,
-            scheduler_args=config.scheduler,
-            pre_transforms=pre_transforms,
-            norm_dict=norm_dict,
+    # Check if we should load a pre-trained embedding network
+    embedding_checkpoint = config.model.embedding.get('checkpoint', None)
+    freeze_embedding = config.model.embedding.get('freeze', False)
+
+    if embedding_checkpoint is not None:
+        # Load pre-trained embedding network
+        embedding_nn, _ = load_embedding_network(
+            config,
+            embedding_checkpoint,
+            freeze=freeze_embedding
         )
     else:
-        raise ValueError(f"Unknown model type: {config.model.type}")
+        # Create new embedding network
+        print("[Model] Creating new embedding network...")
+        embedding_nn = create_embedding_network(config)
+
+    # Create NPE model
+    # Note: pre_transforms goes to NPE, not embedding_nn
+    print("[Model] Creating NPE model...")
+
+    # Check if we should initialize flows from embedding
+    init_flows_from_embedding = config.model.get('init_flows_from_embedding', False)
+
+    model = NPE(
+        input_size=config.model.input_size,
+        output_size=config.model.output_size,
+        flows_args=config.model.flows,
+        embedding_nn=embedding_nn,
+        optimizer_args=config.optimizer,
+        scheduler_args=config.scheduler,
+        norm_dict=norm_dict,
+        pre_transforms=pre_transforms,
+        init_flows_from_embedding=init_flows_from_embedding,
+    )
+
+    return model
 
 
 def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogger) -> list:
@@ -150,6 +260,7 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
     Returns:
         List of callback instances
     """
+    # default callbacks
     callbacks = [
         EarlyStopping(
             monitor='val/loss',
@@ -173,10 +284,27 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
         ),
         LearningRateMonitor(logging_interval="step"),
     ]
+
+    if config.get('enable_visualization_callback', True):
+        print("[Callbacks] Adding NPE Visualization Callback")
+        callbacks.append(
+            NPEVisualizationCallback(
+                plot_every_n_epochs=config.visualization.get('plot_every_n_epochs', 1),
+                n_posterior_samples=config.visualization.get('n_posterior_samples', 1000),
+                n_val_samples=config.visualization.get('n_val_samples', 100),
+                plot_median_v_true=config.visualization.get('plot_median_v_true', True),
+                plot_tarp=config.visualization.get('plot_tarp', True),
+                plot_rank=config.visualization.get('plot_rank', True),
+                use_default_mplstyle=config.visualization.get('use_default_mplstyle', True),
+            )
+        )
+
     return callbacks
 
+
+
 def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
-    """Train the GNN embedding model with wandb logging.
+    """Train the NPE model with wandb logging.
 
     Args:
         config: Configuration dictionary containing model and training parameters
@@ -198,8 +326,9 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     print(f"[WandB] Mode: {wandb_mode}")
 
     wandb_logger = WandbLogger(
-        project=config.get("wandb_project", "jgnn"),
+        project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
+        id=config.get("id", None),
         save_dir=str(run_dir),
         log_model="all",
         config=config.to_dict(),
@@ -207,18 +336,27 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         resume="allow",
     )
 
+    # Load embedding network if specified (to potentially extract norm_dict)
+    embedding_norm_dict = None
+    embedding_checkpoint = config.model.get('embedding_checkpoint', None)
+    if embedding_checkpoint is not None:
+        _, embedding_norm_dict = load_embedding_network(
+            embedding_checkpoint,
+            freeze=False  # Don't freeze yet, just extracting norm_dict
+        )
+
     # Prepare data
     print("[Data] Loading datasets...")
-    train_loader, val_loader, norm_dict = prepare_data(config)
+    train_loader, val_loader, norm_dict = prepare_data(config, embedding_norm_dict)
     print(f"[Data] Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
 
-    # Build pre-transforms
+    # Build pre-transforms (will be passed to NPE, not embedding_nn)
     print("[Transforms] Building pre-transforms...")
     pre_transforms = build_transformation(
         norm_dict=norm_dict, **config.pre_transforms)
 
     # Create model
-    print("[Model] Creating GNN embedding model...")
+    print("[Model] Creating NPE model...")
     model = create_model(config, pre_transforms, norm_dict)
 
     # Print trainable vs frozen parameters
@@ -237,7 +375,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         print(f"[Checkpoint] Resuming from: {checkpoint_path}")
         print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
-    # Create callbacks
+    # Create callbacks (after wandb_logger is initialized)
     callbacks = create_callbacks(config, wandb_logger)
     print(f"[Callbacks] Created {len(callbacks)} callbacks")
 

@@ -47,7 +47,7 @@ from optuna.integration import PyTorchLightningPruningCallback
 from absl import flags
 from ml_collections import config_flags
 
-import datasets
+from jgnn import datasets
 from jgnn.models import NPE
 from jgnn.transforms import build_transformation
 from jgnn.callbacks.visualization import NPEVisualizationCallback

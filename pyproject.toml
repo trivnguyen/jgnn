@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jgnn"
+version = "2.0.0"
+description = "Graph Neural Posterior Estimation for dark matter density profiles"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+
+dependencies = [
+    "numpy",
+    "torch",
+    "pytorch-lightning",
+    "torch-geometric",
+    "h5py",
+    "ml-collections",
+    "wandb",
+    "optuna",
+    "tqdm",
+    "matplotlib",
+    "scipy",
+]
+
+[tool.setuptools]
+packages = ["jgnn"]
