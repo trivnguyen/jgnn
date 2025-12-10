@@ -60,11 +60,12 @@ def project2d(pos, vel, axis=0, use_proper_motions=False):
 
 ### Feature Engineering ###
 
-def parse_graph_features(graph_features, norm_rstar=False):
+def convert_all_graph_features(graph_features, norm_rstar=False):
     """Parse graph features into training target.
 
-    Converts linear parameters to log-space and handles relative parameter
-    specifications.
+    Converts linear parameters to log-space and vice versa, and creates all
+    ratio variants (r_star/r_dm, r_a/r_dm, r_a/r_star). Ensures comprehensive
+    representation where every quantity has both linear and log versions.
 
     Parameters
     ----------
@@ -76,46 +77,76 @@ def parse_graph_features(graph_features, norm_rstar=False):
     Returns
     -------
     new_graph_features : dict
-        Parsed graph features with log-space parameters
+        Parsed graph features with comprehensive parameter representations:
+        - DM: r_dm, log_r_dm, rho_0, log_rho_0
+        - Stellar: r_star, log_r_star, r_star_r_dm, log_r_star_r_dm
+        - DF: r_a, log_r_a, r_a_r_dm, log_r_a_r_dm, r_a_r_star, log_r_a_r_star
     """
     # create a copy of the graph features
     new_graph_features = graph_features.copy()
 
-    # parse DM parameters
-    new_graph_features['dm_log_r_dm'] = np.log10(graph_features['dm_r_dm'])
-    new_graph_features['dm_log_rho_0'] = np.log10(graph_features['dm_rho_0'])
+    # ===== DM parameters =====
+    # Ensure both linear and log versions exist
+    if graph_features.get('dm_r_dm') is not None:
+        new_graph_features['dm_log_r_dm'] = np.log10(graph_features['dm_r_dm'])
+    elif graph_features.get('dm_log_r_dm') is not None:
+        new_graph_features['dm_r_dm'] = 10 ** graph_features['dm_log_r_dm']
+        new_graph_features['dm_log_r_dm'] = graph_features['dm_log_r_dm']
+    else:
+        raise ValueError('Cannot find dm_r_dm or dm_log_r_dm')
 
-    # parse stellar parameters
+    if graph_features.get('dm_rho_0') is not None:
+        new_graph_features['dm_log_rho_0'] = np.log10(graph_features['dm_rho_0'])
+    elif graph_features.get('dm_log_rho_0') is not None:
+        new_graph_features['dm_rho_0'] = 10 ** graph_features['dm_log_rho_0']
+        new_graph_features['dm_log_rho_0'] = graph_features['dm_log_rho_0']
+    else:
+        raise ValueError('Cannot find dm_rho_0 or dm_log_rho_0')
+
+    # ===== Stellar parameters =====
+    # First, ensure we have stellar_r_star (absolute value)
     if graph_features.get('stellar_r_star') is not None:
-        new_graph_features['stellar_log_r_star'] = np.log10(
-            graph_features['stellar_r_star'])
+        stellar_r_star = graph_features['stellar_r_star']
     elif graph_features.get('stellar_r_star_r_dm') is not None:
-        new_graph_features['stellar_log_r_star'] = (
-            np.log10(graph_features['stellar_r_star_r_dm'])
-            + new_graph_features['dm_log_r_dm'])
+        stellar_r_star = graph_features['stellar_r_star_r_dm'] * new_graph_features['dm_r_dm']
+        new_graph_features['stellar_r_star'] = stellar_r_star
+    elif graph_features.get('stellar_log_r_star') is not None:
+        stellar_r_star = 10 ** graph_features['stellar_log_r_star']
+        new_graph_features['stellar_r_star'] = stellar_r_star
     else:
         raise ValueError('Cannot find stellar radius')
 
-    # parse DF parameters
+    # Create all stellar variants
+    new_graph_features['stellar_log_r_star'] = np.log10(stellar_r_star)
+    new_graph_features['stellar_r_star_r_dm'] = stellar_r_star / new_graph_features['dm_r_dm']
+    new_graph_features['stellar_log_r_star_r_dm'] = np.log10(
+        new_graph_features['stellar_r_star_r_dm'])
+
+    # ===== DF parameters =====
+    # First, ensure we have df_r_a (absolute value)
     if graph_features.get('df_r_a') is not None:
-        new_graph_features['df_log_r_a'] = np.log10(graph_features['df_r_a'])
+        df_r_a = graph_features['df_r_a']
     elif graph_features.get('df_r_a_r_dm') is not None:
-        new_graph_features['df_log_r_a'] = (
-            np.log10(graph_features['df_r_a_r_dm'])
-            + new_graph_features['dm_log_r_dm'])
+        df_r_a = graph_features['df_r_a_r_dm'] * new_graph_features['dm_r_dm']
+        new_graph_features['df_r_a'] = df_r_a
     elif graph_features.get('df_r_a_r_star') is not None:
-        new_graph_features['df_log_r_a'] = (
-            np.log10(graph_features['df_r_a_r_star'])
-            + new_graph_features['stellar_log_r_star'])
+        df_r_a = graph_features['df_r_a_r_star'] * stellar_r_star
+        new_graph_features['df_r_a'] = df_r_a
+    elif graph_features.get('df_log_r_a') is not None:
+        df_r_a = 10 ** graph_features['df_log_r_a']
+        new_graph_features['df_r_a'] = df_r_a
     else:
         raise ValueError('Cannot find DF scale radius')
 
-    # normalize by the stellar radius
-    if norm_rstar:
-        for k in ['dm_log_r_dm', 'df_log_r_a', ]:
-            new_graph_features[k] -= new_graph_features['stellar_log_r_star']
-        new_graph_features['dm_log_rho_0'] -= (
-            new_graph_features['stellar_log_r_star'] * 3)
+    # Create all DF variants
+    new_graph_features['df_log_r_a'] = np.log10(df_r_a)
+    new_graph_features['df_r_a_r_dm'] = df_r_a / new_graph_features['dm_r_dm']
+    new_graph_features['df_log_r_a_r_dm'] = np.log10(
+        new_graph_features['df_r_a_r_dm'])
+    new_graph_features['df_r_a_r_star'] = df_r_a / stellar_r_star
+    new_graph_features['df_log_r_a_r_star'] = np.log10(
+        new_graph_features['df_r_a_r_star'])
+
     return new_graph_features
 
 
@@ -129,7 +160,6 @@ def preprocess_simulations(
     apply_projection: bool = True,
     projection_axis: Optional[int] = None,
     use_proper_motions: bool = False,
-    norm_rstar: bool = False,
     seed: Optional[int] = None,
     verbose: bool = False,
 ) -> Tuple[Dict, Dict]:
@@ -159,8 +189,6 @@ def preprocess_simulations(
         Default is None.
     use_proper_motions : bool
         Whether to include proper motions in the velocities.
-    norm_rstar : bool
-        Whether to normalize positions by stellar rstar.
     seed : int, optional
         Random seed for reproducibility.
     verbose : bool
@@ -184,7 +212,6 @@ def preprocess_simulations(
         'vel_error': [],
     }
     new_graph_features = {k: [] for k in graph_features.keys()}
-    new_graph_features['cond'] = []
     new_graph_features['num_stars'] = []
 
     for i in range(num_galaxies):
@@ -192,7 +219,12 @@ def preprocess_simulations(
         graph = {k: v[i] for k, v in graph_features.items()}
         pos = nodes['pos'].astype(np.float32)
         vel = nodes['vel'].astype(np.float32)
-        stellar_rstar = graph['stellar_r_star_r_dm'] * graph['dm_r_dm']
+        if graph.get('stellar_r_star') is not None:
+            stellar_rstar = graph['stellar_r_star']
+        elif graph.get('stellar_r_star_r_dm') is not None:
+            stellar_rstar = graph['stellar_r_star_r_dm'] * graph['dm_r_dm']
+        else:
+            raise ValueError('Cannot find stellar radius')
 
         # apply velocity cut on the 3d velocity
         # large velocity can be due to AGAMA sampling issues
@@ -234,9 +266,6 @@ def preprocess_simulations(
         vel = vel[mask]
         radius = radius[mask]
 
-        if norm_rstar:
-            pos = pos / stellar_rstar
-
         new_node_features['pos'].append(pos)
         new_node_features['vel'].append(vel)
         new_node_features['vel_true'].append(vel)
@@ -245,7 +274,6 @@ def preprocess_simulations(
         for k in graph.keys():
             new_graph_features[k].append(graph[k])
         new_graph_features['num_stars'].append(len(pos))
-        new_graph_features['cond'].append(np.log10(stellar_rstar))
 
     # Finalize node and graph features
     if len(new_node_features['pos']) == 0:
@@ -255,8 +283,7 @@ def preprocess_simulations(
         new_node_features[k] = np.concatenate(new_node_features[k])
     for k in new_graph_features.keys():
         new_graph_features[k] = np.array(new_graph_features[k])
-    new_graph_features = parse_graph_features(
-        new_graph_features, norm_rstar=norm_rstar)
+    new_graph_features = convert_all_graph_features(new_graph_features)
 
     return new_node_features, new_graph_features
 
