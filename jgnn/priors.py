@@ -57,7 +57,7 @@ class BoxUniform:
     >>> # samples[:, 1] is always 0.5
     """
 
-    def __init__(self, prior_dict: Dict):
+    def __init__(self, prior_dict: Dict, device: Optional[torch.device] = None):
         self.prior_dict = prior_dict
 
         # Parse the prior_dict to extract labels, min, and max
@@ -113,8 +113,8 @@ class BoxUniform:
             if self.is_fixed[i]:
                 max_adjusted[i] = self.min[i] + epsilon
 
-        min_torch = torch.tensor(self.min, dtype=torch.float32)
-        max_torch = torch.tensor(max_adjusted, dtype=torch.float32)
+        min_torch = torch.tensor(self.min, dtype=torch.float32, device=device)
+        max_torch = torch.tensor(max_adjusted, dtype=torch.float32, device=device)
 
         self._torch_dist = dist.Independent(
             dist.Uniform(min_torch, max_torch),
@@ -281,3 +281,27 @@ class BoxUniform:
             'min': self.min.tolist(),
             'max': self.max.tolist()
         }
+
+    def to_device(self, device: torch.device):
+        """
+        Move internal torch distributions to specified device.
+
+        Parameters
+        ----------
+        device : torch.device
+            Target device
+        """
+        # Recreate torch distribution on the target device
+        epsilon = 1e-6
+        max_adjusted = self.max.copy()
+        for i in range(self.ndim):
+            if self.is_fixed[i]:
+                max_adjusted[i] = self.min[i] + epsilon
+
+        min_torch = torch.tensor(self.min, dtype=torch.float32, device=device)
+        max_torch = torch.tensor(max_adjusted, dtype=torch.float32, device=device)
+
+        self._torch_dist = dist.Independent(
+            dist.Uniform(min_torch, max_torch),
+            reinterpreted_batch_ndims=1
+        )
