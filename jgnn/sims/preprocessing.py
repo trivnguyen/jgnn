@@ -60,7 +60,7 @@ def project2d(pos, vel, axis=0, use_proper_motions=False):
 
 ### Feature Engineering ###
 
-def convert_all_graph_features(graph_features, norm_rstar=False):
+def parse_graph_features(graph_features, norm_rstar=False):
     """Parse graph features into training target.
 
     Converts linear parameters to log-space and vice versa, and creates all
@@ -283,7 +283,7 @@ def preprocess_simulations(
         new_node_features[k] = np.concatenate(new_node_features[k])
     for k in new_graph_features.keys():
         new_graph_features[k] = np.array(new_graph_features[k])
-    new_graph_features = convert_all_graph_features(new_graph_features)
+    new_graph_features = parse_graph_features(new_graph_features)
 
     return new_node_features, new_graph_features
 
