@@ -100,7 +100,7 @@ def suggest_parameter(trial: optuna.Trial, param_name: str, param_config: dict) 
 
 def is_parameter_config(obj: Any) -> bool:
     """Check if object is a parameter configuration (has 'type' key)."""
-    return isinstance(obj, dict) and 'type' in obj
+    return isinstance(obj, (dict, ml_collections.ConfigDict)) and 'type' in obj
 
 
 def traverse_and_suggest(
@@ -122,12 +122,11 @@ def traverse_and_suggest(
 
     for key, value in search_space.items():
         current_path = f"{path_prefix}.{key}" if path_prefix else key
-
         if is_parameter_config(value):
             # This is a parameter to optimize
             suggested_value = suggest_parameter(trial, current_path, value)
             suggestions[current_path] = suggested_value
-        elif isinstance(value, dict):
+        elif isinstance(value, (dict, ml_collections.ConfigDict)):
             # This is a nested dict, recurse deeper
             nested_suggestions = traverse_and_suggest(trial, value, current_path)
             suggestions.update(nested_suggestions)
@@ -160,6 +159,7 @@ def update_config_from_trial(config: ml_collections.ConfigDict, trial: optuna.Tr
     """
     # Deep copy to avoid modifying original
     trial_config = copy.deepcopy(config)
+    trial_config.unlock()
 
     # Check search space exists
     if not hasattr(trial_config.optuna, 'search_space'):
@@ -215,7 +215,7 @@ def update_config_from_trial(config: ml_collections.ConfigDict, trial: optuna.Tr
     return trial_config
 
 
-def create_callbacks_for_optuna(
+def create_callbacks(
     config: ml_collections.ConfigDict,
     trial: optuna.Trial,
     wandb_logger: WandbLogger
@@ -296,6 +296,7 @@ def objective(trial: optuna.Trial, base_config: ml_collections.ConfigDict) -> fl
         tags=['optuna'],
     )
 
+
     # Load embedding network if specified (to potentially extract norm_dict)
     embedding_norm_dict = None
     embedding_checkpoint = config.model.embedding.get('checkpoint', None)
@@ -321,7 +322,7 @@ def objective(trial: optuna.Trial, base_config: ml_collections.ConfigDict) -> fl
     print(f"[Trial {trial.number}] Trainable parameters: {trainable_params:,}")
 
     # Create callbacks
-    callbacks = create_callbacks_for_optuna(config, trial, wandb_logger)
+    callbacks = create_callbacks(config, trial, wandb_logger)
 
     # Create trainer
     trainer = pl.Trainer(
@@ -418,8 +419,8 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/optuna/"):
 
     # Print search space
     print(f"\n[Optuna] Search space:")
-    for param_name, param_config in config.optuna.search_space.items():
-        print(f"  {param_name}: {param_config}")
+    # for param_name, param_config in config.optuna.search_space.items():
+        # print(f"  {param_name}: {param_config}")
 
     # Run optimization
     n_trials = config.optuna.get('n_trials', 100)
