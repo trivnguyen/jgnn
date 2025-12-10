@@ -1,10 +1,12 @@
 """Core simulation functionality for generating dwarf galaxy stellar kinematics."""
 
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional
 import warnings
 import numpy as np
 import astropy.units as u
 from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Optional agama import with graceful error handling
 _AGAMA_AVAILABLE = False
@@ -263,8 +265,38 @@ def run_simulation(
     return node_features, graph_features
 
 
+def _run_simulation_worker(args: Tuple[int, Dict, int, int]) -> Tuple[int, Optional[Dict], Optional[Dict]]:
+    """Worker function for multiprocessing simulation.
+
+    Parameters
+    ----------
+    args : tuple
+        Tuple of (index, params, num_stars, max_iter)
+
+    Returns
+    -------
+    index : int
+        Index of the simulation
+    node_features : dict or None
+        Node features if successful, None if failed
+    graph_features : dict or None
+        Graph features if successful, None if failed
+    """
+    index, params, num_stars, max_iter = args
+    try:
+        node_feat, graph_feat = run_simulation(params, num_stars, max_iter=max_iter)
+        return index, node_feat, graph_feat
+    except Exception as e:
+        warnings.warn(f"Simulation {index} failed: {str(e)}")
+        return index, None, None
+
+
 def run_simulation_batch(
-    params_list: List[Dict], num_stars_list: List[int], max_iter: int = N_MAX_ITER
+    params_list: List[Dict],
+    num_stars_list: List[int],
+    max_iter: int = N_MAX_ITER,
+    n_jobs: Optional[int] = None,
+    use_multiprocessing: bool = True
 ) -> Tuple[Dict, Dict]:
     """Run simulations for a batch of galaxies.
 
@@ -276,6 +308,11 @@ def run_simulation_batch(
         List of number of stars to sample for each galaxy
     max_iter : int, optional
         Maximum number of sampling attempts per galaxy (default: 1000)
+    n_jobs : int, optional
+        Number of parallel processes to use. If None, uses all available CPUs.
+        Set to 1 to disable multiprocessing. Default: None (use all CPUs)
+    use_multiprocessing : bool, optional
+        Whether to use multiprocessing. If False, runs sequentially. Default: True
 
     Returns
     -------
@@ -291,42 +328,95 @@ def run_simulation_batch(
     ------
     RuntimeError
         If all simulations fail, an error is raised.
+
+    Notes
+    -----
+    Multiprocessing is used by default to speed up simulations. Each simulation
+    runs independently in a separate process. If AGAMA has issues with multiprocessing
+    on your system, set use_multiprocessing=False.
     """
 
     num_galaxies = len(params_list)
+
+    # Determine number of workers
+    if n_jobs is None:
+        n_workers = cpu_count()
+    else:
+        n_workers = min(n_jobs, num_galaxies)
+
+    # Disable multiprocessing if requested or if only 1 job
+    if not use_multiprocessing or n_workers == 1:
+        n_workers = 1
+        use_mp = False
+    else:
+        use_mp = True
+
+    print(f"[Simulations] Running {num_galaxies} simulations with {n_workers} worker(s)...")
+
     all_pos = []
     all_vel = []
     graph_feat_lists = {key: [] for key in []}
     successful_sims = []
 
-    print(f"[Simulations] Running {num_galaxies} simulations...")
+    if use_mp:
+        # Multiprocessing mode
+        # Prepare arguments for workers
+        worker_args = [
+            (i, params_list[i], num_stars_list[i], max_iter)
+            for i in range(num_galaxies)
+        ]
 
-    for i in tqdm(range(num_galaxies), desc="Simulating galaxies"):
-        try:
-            node_feat, graph_feat = run_simulation(
-                params_list[i],
-                num_stars_list[i],
-                max_iter=max_iter
-            )
+        # Run simulations in parallel
+        with Pool(processes=n_workers) as pool:
+            results = list(tqdm(
+                pool.imap(_run_simulation_worker, worker_args),
+                total=num_galaxies,
+                desc="Simulating galaxies"
+            ))
 
-            all_pos.append(node_feat['pos'])
-            all_vel.append(node_feat['vel'])
+        # Process results
+        for index, node_feat, graph_feat in results:
+            if node_feat is not None and graph_feat is not None:
+                all_pos.append(node_feat['pos'])
+                all_vel.append(node_feat['vel'])
 
-            # Initialize graph feature lists on first success
-            if len(graph_feat_lists) == 0:
-                graph_feat_lists = {key: [] for key in graph_feat.keys()}
+                # Initialize graph feature lists on first success
+                if len(graph_feat_lists) == 0:
+                    graph_feat_lists = {key: [] for key in graph_feat.keys()}
 
-            # Append graph features
-            for key in graph_feat.keys():
-                graph_feat_lists[key].append(graph_feat[key])
+                # Append graph features
+                for key in graph_feat.keys():
+                    graph_feat_lists[key].append(graph_feat[key])
 
-            successful_sims.append(i)
+                successful_sims.append(index)
+    else:
+        # Sequential mode (original implementation)
+        for i in tqdm(range(num_galaxies), desc="Simulating galaxies"):
+            try:
+                node_feat, graph_feat = run_simulation(
+                    params_list[i],
+                    num_stars_list[i],
+                    max_iter=max_iter
+                )
 
-        except Exception as e:
-            warnings.warn(
-                f"Simulation {i} failed after {max_iter} attempts. Error: {str(e)}"
-            )
-            continue
+                all_pos.append(node_feat['pos'])
+                all_vel.append(node_feat['vel'])
+
+                # Initialize graph feature lists on first success
+                if len(graph_feat_lists) == 0:
+                    graph_feat_lists = {key: [] for key in graph_feat.keys()}
+
+                # Append graph features
+                for key in graph_feat.keys():
+                    graph_feat_lists[key].append(graph_feat[key])
+
+                successful_sims.append(i)
+
+            except Exception as e:
+                warnings.warn(
+                    f"Simulation {i} failed after {max_iter} attempts. Error: {str(e)}"
+                )
+                continue
 
     # Combine results
     if len(successful_sims) == 0:
