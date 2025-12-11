@@ -296,7 +296,7 @@ def run_simulation_batch(
     num_stars_list: List[int],
     max_iter: int = N_MAX_ITER,
     n_jobs: Optional[int] = None,
-    use_multiprocessing: bool = True
+    use_multiprocessing: bool = False
 ) -> Tuple[Dict, Dict]:
     """Run simulations for a batch of galaxies.
 
