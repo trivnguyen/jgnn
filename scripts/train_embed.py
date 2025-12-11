@@ -197,14 +197,18 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     wandb_mode = 'disabled' if config.get('debug', False) else 'online'
     print(f"[WandB] Mode: {wandb_mode}")
 
+    tags = config.get('tags', [])
+    tags.append('embedding')
     wandb_logger = WandbLogger(
-        project=config.get("wandb_project", "jgnn"),
+        project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
+        id=config.get("id", None),
         save_dir=str(run_dir),
         log_model="all",
         config=config.to_dict(),
         mode=wandb_mode,
         resume="allow",
+        tags=list(set(tags))
     )
 
     # Prepare data
