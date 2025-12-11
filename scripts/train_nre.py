@@ -312,6 +312,8 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     wandb_mode = 'disabled' if config.get('debug', False) else 'online'
     print(f"[WandB] Mode: {wandb_mode}")
 
+    tags = config.get('tags', [])
+    tags.append('nre')
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
@@ -321,6 +323,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         config=config.to_dict(),
         mode=wandb_mode,
         resume="allow",
+        tags=list(set(tags))
     )
 
     # Load embedding network if specified (to potentially extract norm_dict)

@@ -326,7 +326,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     print(f"[WandB] Mode: {wandb_mode}")
 
     tags = config.get('tags', [])
-    tags.append('nre')
+    tags.append('npe')
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
