@@ -167,9 +167,10 @@ class NRE(pl.LightningModule):
         pos_logits = self.classifier(pos_combined).squeeze(-1)
 
         # Create negative samples (shuffled pairs)
-        perm_idx = torch.randperm(batch_size, device=theta.device)
-        theta_shuffled = theta[perm_idx]
-        neg_combined = torch.cat([embedding, theta_shuffled], dim=-1)
+        # the following makes sure no theta is paired with its own embedding
+        probs = torch.ones((batch_size, batch_size)) * (1 - torch.eye(batch_size)) / (batch_size - 1)
+        indices = torch.multinomial(probs, 1, replacement=False).squeeze(-1)
+        neg_combined = torch.cat([embedding, theta[indices]], dim=-1)
         neg_logits = self.classifier(neg_combined).squeeze(-1)
 
         # Binary cross-entropy loss
