@@ -30,8 +30,8 @@ def get_config():
     # =========================================================================
     # Data Configuration
     # =========================================================================
-    config.data_root = '/mnt/ceph/users/tnguyen/jeans_gnn/datasets/processed_datasets/'
-    config.data_name = 'gnfw_profiles/gnfw_beta_priorlarge_pois100'
+    config.data_root = '/path/to/datasets/processed_datasets/'
+    config.data_name = 'example_dataset/example_data'
     config.num_datasets = 1  # Small for testing
     config.init = 0
     config.labels = (
@@ -47,7 +47,8 @@ def get_config():
     # =========================================================================
     config.workdir = './test_optuna_npe'
     config.name = 'test_optuna'
-    config.wandb_project = 'jgnn-npe-optuna-test'
+    config.wandb_project = 'jgnn-npe-optuna-example'
+    config.entity = None
     config.debug = True  # Set to True to disable wandb
     config.checkpoint = None  # Path to NPE checkpoint for resuming
     config.reset_optimizer = False

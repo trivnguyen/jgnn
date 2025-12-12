@@ -286,6 +286,7 @@ def objective(trial: optuna.Trial, base_config: ml_collections.ConfigDict) -> fl
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-npe-optuna"),
         name=f"{config.get('name', 'optuna')}_trial_{trial.number}",
+        entity=config.get("entity", None),
         save_dir=str(trial_workdir),
         log_model=False,  # Don't log all models to wandb during optuna
         config={

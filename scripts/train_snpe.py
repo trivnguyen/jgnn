@@ -622,6 +622,7 @@ def train_round(
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-snpe"),
         name=f"{config.get('name')}_round{round_num}",
+        entity=config.get("entity", None),
         id=None,
         save_dir=str(round_dir / "logs"),
         log_model=config.get("log_model", "all"),

@@ -11,8 +11,8 @@ def get_config():
     config.seed_training = 19318
 
     # data configuration
-    config.data_root = '/mnt/ceph/users/tnguyen/jeans_gnn/datasets/processed_datasets/'
-    config.data_name = 'gnfw_profiles/gnfw_beta_priorlarge_pois100'
+    config.data_root = '/path/to/datasets/processed_datasets/'
+    config.data_name = 'example_dataset/example_data'
     config.num_datasets = 1
     config.labels = (
         'dm_gamma', 'dm_log_r_dm', 'dm_log_rho_0',
@@ -22,10 +22,11 @@ def get_config():
     config.num_workers = 0
 
     ## LOGGING AND WANDB CONFIGURATION ###
-    config.workdir = '/mnt/ceph/users/tnguyen/jeans_gnn/trained_models-v2'
+    config.workdir = './example_workdir'
     config.name = 'example_embed_run'
     config.debug = False
-    config.wandb_project = 'jgnn_v2.0_test'
+    config.wandb_project = 'jgnn_v2.0_example'
+    config.entity = None
     config.checkpoint = None
     config.reset = True
     config.reset_optimizer = True

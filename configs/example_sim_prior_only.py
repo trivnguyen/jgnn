@@ -97,6 +97,6 @@ def get_config():
 
     ### OUTPUT CONFIGURATION ###
     config.output = output = ConfigDict()
-    output.path = '/mnt/home/tnguyen/ceph/jeans_gnn/datasets/example/test_sim_prior_only.hdf5'
+    output.path = '/path/to/output/simulations.hdf5'
 
     return config

@@ -26,10 +26,11 @@ def get_config():
     config.num_workers = 0
 
     ### LOGGING AND WANDB CONFIGURATION ###
-    config.workdir = '/mnt/ceph/users/tnguyen/jeans_gnn/trained_models-snpe'
+    config.workdir = './example_snpe_workdir'
     config.name = 'example_snpe_run'
     config.debug = False
-    config.wandb_project = 'jgnn_snpe'
+    config.wandb_project = 'jgnn_snpe_example'
+    config.entity = None
     config.enable_progress_bar = True
     config.log_model = 'all'
 
@@ -41,13 +42,14 @@ def get_config():
     ### OBSERVATION CONFIGURATION (for SNPE) ###
     config.use_observation = True
     config.observation = observation = ConfigDict()
-    observation.path = '/mnt/home/tnguyen/projects/jeans_gnn/datasets/processed_data/draco_desi_p0.80.csv'
-    observation.key = 'draco_1'
+    observation.path = '/path/to/observation_data.csv'
+    observation.key = 'example_observation'
     observation.prob_threshold = 0.8
 
     # Load metadata for the observation
-    meta = pd.read_csv('/mnt/home/tnguyen/projects/jeans_gnn/datasets/tables/dwarfs.csv')
-    rstar = meta[meta.key == observation.key].rhalf_sph_physical.values[0] / 1000
+    # meta = pd.read_csv('/path/to/metadata.csv')
+    # rstar = meta[meta.key == observation.key].rhalf_sph_physical.values[0] / 1000
+    rstar = 0.3  # Example value in kpc
     observation.meta = {
         'stellar_log_r_star': np.log10(rstar)
     }

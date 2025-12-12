@@ -55,7 +55,7 @@ def get_config():
     config.proposal = proposal = ConfigDict()
 
     # Path to trained NPE checkpoint from previous round
-    proposal.checkpoint = '/mnt/ceph/users/tnguyen/jeans_gnn/trained_models-v2/example_npe_run/jgnn_v2.0_test/abc123/checkpoints/best.ckpt'
+    proposal.checkpoint = '/path/to/npe_checkpoint.ckpt'
     proposal.batch_size = 100
     proposal.device = 'cuda'
 
@@ -63,7 +63,7 @@ def get_config():
     config.observation = observation = ConfigDict()
 
     # Path to observation HDF5 file
-    observation.path = '/mnt/home/tnguyen/projects/jeans_gnn/observations/draco/draco_processed.hdf5'
+    observation.path = '/path/to/observation.hdf5'
 
     ### SIMULATION CONFIGURATION ###
     config.simulation = simulation = ConfigDict()
@@ -94,6 +94,6 @@ def get_config():
 
     ### OUTPUT CONFIGURATION ###
     config.output = output = ConfigDict()
-    output.path = '/mnt/home/tnguyen/projects/jeans_gnn/datasets/raw_datasets/test_sim_proposal_truncated.hdf5'
+    output.path = '/path/to/output/simulations.hdf5'
 
     return config

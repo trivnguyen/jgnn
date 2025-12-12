@@ -317,6 +317,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     wandb_logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
+        entity=config.get("entity", None),
         id=config.get("id", None),
         save_dir=str(run_dir),
         log_model="all",
