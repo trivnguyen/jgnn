@@ -55,6 +55,22 @@ class GNNBlock(nn.Module):
             self.layer_params['concat'] = False  # only works when False
             self.graph_layer =  gnn.GATConv(
                 self.input_size, self.output_size, **self.layer_params)
+        elif self.layer_name == "APPNP":
+            self.has_edge_attr = False
+            self.has_edge_weight = True
+            self.graph_layer = gnn.APPNP(
+                self.layer_params.get('K', 10),
+                self.layer_params.get('alpha', 0.1)
+            )
+        elif self.layer_name == "SGConv":
+            self.has_edge_attr = False
+            self.has_edge_weight = True
+            self.graph_layer = gnn.SGConv(
+                self.input_size, self.output_size,
+                K=self.layer_params.get('K', 2),
+                cached=self.layer_params.get('cached', False)
+            )
+
         else:
             raise ValueError(f"Unknown graph layer: {layer_name}")
 

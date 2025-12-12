@@ -100,28 +100,25 @@ class NPE(pl.LightningModule):
                   f" {sum(p.numel() for p in self.flows.parameters()):,} parameters")
         else:
             # create the flow from scratch
-            features = self.output_size
-            context_features = embedding_output_size
-            num_transforms = self.flows_args.get('num_transforms', 4)
-            hidden_features = self.flows_args.get('hidden_features', [32, 32])
-            num_bins = self.flows_args.get('num_bins', 8)
-            activation_name = self.flows_args.get('activation', 'tanh')
-            activation_args = self.flows_args.get('activation_args', None)
-            randperm = self.flows_args.get('randperm', True)
-
             # Get activation function
             activation_fn = get_activation(
-                activation_name, activation_args, return_instance=False)
+                self.flows_args.get('activation', 'tanh'),
+                self.flows_args.get('activation_args', None),
+                return_instance=False
+            )
 
             # Build the flow
             self.flows = build_flows(
-                features=features,
-                context_features=context_features,
-                num_transforms=num_transforms,
-                hidden_features=hidden_features,
-                num_bins=num_bins,
+                features=self.output_size,
+                context_features=embedding_output_size,
+                num_transforms=self.flows_args.get('num_transforms', 4),
+                hidden_features=self.flows_args.get('hidden_features', [32, 32]),
+                num_bins=self.flows_args.get('num_bins', 8),
                 activation=activation_fn,
-                randperm=randperm
+                flow_type=self.flows_args.get('flow_type', 'spline'),
+                randperm=self.flows_args.get('randperm', True),
+                dropout=self.flows_args.get('dropout', 0.0),
+                residual=self.flows_args.get('residual', False)
             )
             print(f"[NPE] Flows built from scratch with"
                   f" {sum(p.numel() for p in self.flows.parameters()):,} parameters")
