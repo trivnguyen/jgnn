@@ -157,11 +157,11 @@ class GNNEmbedding(pl.LightningModule):
             'x': batch.x,
             'edge_index': batch.edge_index,
             'batch': batch.batch,
-            'target': batch.theta,
-            'edge_attr': batch.edge_attr if hasattr(batch, 'edge_attr') else None,
-            'edge_weight': batch.edge_weight if hasattr(batch, 'edge_weight') else None,
-            'cond': batch.cond if hasattr(batch, 'cond') else None,
-            'batch_size': batch.num_graphs if hasattr(batch, 'num_graphs') else batch.batch.max().item() + 1,
+            'target': batch.get('theta'),
+            'edge_attr': batch.get('edge_attr'),
+            'edge_weight': batch.get('edge_weight'),
+            'cond': batch.get('cond'),
+            'batch_size': batch.get('num_graphs', batch.batch.max().item() + 1),
         }
         return batch_dict
 

@@ -207,9 +207,9 @@ class TransformerEmbedding(pl.LightningModule):
         batch_dict = {
             'x': x_padded,
             'mask': mask,
-            'target': batch.theta if hasattr(batch, 'theta') else None,
+            'target': batch.get('theta'),
             'pos_enc': None,
-            'cond': batch.cond if hasattr(batch, 'cond') else None,
+            'cond': batch.get('cond'),
             'batch_size': x_padded.size(0),
         }
 

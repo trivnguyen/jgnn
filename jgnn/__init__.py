@@ -5,6 +5,7 @@ from . import transforms
 from . import callbacks
 from . import priors
 from . import datasets
+from . import utils
 
 __all__ = [
     'models',
@@ -12,4 +13,5 @@ __all__ = [
     'callbacks',
     'priors',
     'datasets',
+    'utils'
 ]
