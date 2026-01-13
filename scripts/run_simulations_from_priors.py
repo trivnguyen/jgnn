@@ -94,8 +94,9 @@ def main(config: ml_collections.ConfigDict):
 
     print(f"[Sampling] Sampled number of stars: mean={num_stars_list.mean():.1f}, std={num_stars_list.std():.1f}")
 
-    print(params_list[0])
-
+    print("\n[Sampling] First 10 sampled parameter sets:")
+    for i in range(10):
+        print(params_list[i])
 
     # Run simulations and preprocess
     node_features, graph_features = run_simulation_batch(
