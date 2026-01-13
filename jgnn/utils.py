@@ -11,21 +11,25 @@ from torch_geometric.data import Data, Batch
 from ml_collections import ConfigDict
 
 def load_wandb_checkpoint(
-    entity: str, project: str, run_name: Optional[str]=None, run_id: Optional[str]=None,
-    run_index: Optional[int]=None, version: str="best"
+    run_path: Optional[str]=None, entity: Optional[str]=None, project: Optional[str]=None,
+    run_id: Optional[str]=None, run_name: Optional[str]=None, run_index: Optional[int]=None,
+    version: str="best"
 ) -> Tuple[str, ConfigDict]:
     """ Fetch checkpoint from wandb
 
     Parameters
     ----------
-    entity : str
-        Wandb entity name
-    project : str
-        Wandb project name
-    run_name : str, optional
-        Wandb run name, by default None. Either run_name or run_id must be provided.
+    run_path : str, optional
+        Full wandb run path in the format "entity/project/run_id" or "entity/project/run_name".
+        If provided, `entity`, `project`, `run_id`, and `run_name` are ignored.
+    entity : str, optional
+        Wandb entity name. Must be given if `run_path` is not provided.
+    project : str, optional
+        Wandb project name. Must be given if `run_path` is not provided.
     run_id : str, optional
-        Wandb run id, by default None. Either run_name or run_id must be provided.
+        Wandb run id, by default None. Either run_name or run_id must be provided if `run_path` is not given.
+    run_name : str, optional
+        Wandb run name, by default None. Either run_name or run_id must be provided if `run_path` is not given.
     run_index: int, optional
         If multiple runs have the same name, specify which one to use (0-indexed).
         Raise error if not specified and multiple runs found.
@@ -38,23 +42,33 @@ def load_wandb_checkpoint(
         config : ConfigDict
             Configuration dictionary from the wandb run
     """
-    if run_name is None and run_id is None:
-        raise ValueError("Either `run_name` or `run_id` must be provided.")
+    if run_path is None:
+        if entity is None or project is None:
+            raise ValueError("Either `run_path` or both `entity` and `project` must be provided.")
+        if run_name is None and run_id is None:
+            raise ValueError("Either `run_name` or `run_id` must be provided.")
 
     api = wandb.Api()
-    if run_name is not None:
-        runs = api.runs(f"{entity}/{project}", filters={"display_name": run_name})
-        if len(runs) == 0:
-            raise ValueError(f"No run found with name: {run_name}")
-        if len(runs) > 1 and run_index is None:
-            raise ValueError(
-                f"Multiple runs found with name: {run_name}. Please specify `run_index`.")
-        run = runs[run_index or 0]
+    if run_path is not None:
+        run = api.run(run_path)
+        config = ConfigDict(run.config)
+        entity = run.entity
+        project = run.project
         run_id = run.id
-        config = ConfigDict(run.config)
     else:
-        run = api.run(f"{entity}/{project}/{run_id}")
-        config = ConfigDict(run.config)
+        if run_id is not None:
+            run = api.run(f"{entity}/{project}/{run_id}")
+            config = ConfigDict(run.config)
+        else:
+            runs = api.runs(f"{entity}/{project}", filters={"display_name": run_name})
+            if len(runs) == 0:
+                raise ValueError(f"No run found with name: {run_name}")
+            if len(runs) > 1 and run_index is None:
+                raise ValueError(
+                    f"Multiple runs found with name: {run_name}. Please specify `run_index`.")
+            run = runs[run_index or 0]
+            run_id = run.id
+            config = ConfigDict(run.config)
 
     artifact = api.artifact(f'{entity}/{project}/model-{run_id}:{version}')
     artifact_dir = artifact.download()
@@ -100,12 +114,13 @@ def load_config_from_wandb(
             raise ValueError(
                 f"Multiple runs found with name: {run_name}. Please specify `run_index`.")
         run = runs[run_index or 0]
+        run_id = run.id
         config = ConfigDict(run.config)
     else:
         run = api.run(f"{entity}/{project}/{run_id}")
         config = ConfigDict(run.config)
 
-    return config
+    return config, run_id
 
 
 def load_local_checkpoint(
