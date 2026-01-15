@@ -52,9 +52,9 @@ class GNNBlock(nn.Module):
         elif self.layer_name == "GATConv":
             self.has_edge_attr = True
             self.has_edge_weight = False
-            self.layer_params['concat'] = False  # only works when False
             self.graph_layer =  gnn.GATConv(
-                self.input_size, self.output_size, **self.layer_params)
+                self.input_size, self.output_size, concat=False,  # only work with concat=False
+                **self.layer_params)
         elif self.layer_name == "APPNP":
             self.has_edge_attr = False
             self.has_edge_weight = True
