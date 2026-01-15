@@ -29,13 +29,11 @@ class UncertaintySampler:
                 raise ValueError("Uncertainty parameters must be non-negative")
             if params['low'] > params['high']:
                 raise ValueError("'low' must be <= 'high' for uniform distribution")
-
         elif distribution_type == 'gaussian':
             if 'mean' not in params or 'std' not in params:
                 raise ValueError("Gaussian distribution requires 'mean' and 'std' parameters")
             if params['mean'] < 0 or params['std'] < 0:
                 raise ValueError("Uncertainty parameters must be non-negative")
-
         elif distribution_type == 'jeffreys':
             if 'low' not in params or 'high' not in params:
                 raise ValueError("Jeffreys prior requires 'low' and 'high' parameters")
@@ -52,6 +50,17 @@ class UncertaintySampler:
                 raise ValueError("'beta' must be > 0")
             if params['x0'] <= 0:
                 raise ValueError("'x0' must be > 0")
+        elif distribution_type == 'uniform_varied':
+            if 'low_range' not in params or 'width_range' not in params:
+                raise ValueError("Uniform distribution requires 'low_range' and 'width_range' parameters")
+            if params['low'][0] < 0 or params['low'][1] < 0:
+                raise ValueError("`low_range` values must be non-negative")
+            if params['width_range'][0] <= 0 or params['width_range'][1] <= 0:
+                raise ValueError("`width_range` values must be positive")
+            if params['low'][0] > params['low'][1]:
+                raise ValueError("'low_range[0]' must be <= 'low_range[1]'")
+            if params['width_range'][0] > params['width_range'][1]:
+                raise ValueError("'width_range[0]' must be <= 'width_range[1]'")
         else:
             raise ValueError(f"Unknown distribution type: {distribution_type}")
 
@@ -82,7 +91,6 @@ class UncertaintySampler:
             # Sample from truncated normal
             samples = truncnorm.rvs(a, b, loc=mean, scale=std, size=n_samples)
             std_values = torch.tensor(samples, dtype=torch.float32)
-
         elif self.distribution_type == 'jeffreys':
             # Jeffreys prior for a Gaussian with known mean: p(sigma) = 1 / sigma
             # This assumes the mean is known and we're only estimating sigma
@@ -96,7 +104,6 @@ class UncertaintySampler:
             log_high = np.log(high)
             log_std_values = torch.rand(n_samples) * (log_high - log_low) + log_low
             std_values = torch.exp(log_std_values)
-
         elif self.distribution_type == 'gamma':
             alpha = self.params['alpha']
             beta = self.params['beta']
@@ -109,6 +116,13 @@ class UncertaintySampler:
             gamma_dist = torch.distributions.Gamma(k, 1)
             z = gamma_dist.sample((n_samples,))
             std_values = x0 * torch.pow(z, 1 / beta)
+        elif self.distribution_type == 'uniform_varied':
+            low_range = self.params['low_range']
+            width_range = self.params['width_range']
+
+            low_samples = torch.rand(n_samples) * (low_range[1] - low_range[0]) + low_range[0]
+            width_samples = torch.rand(n_samples) * (width_range[1] - width_range[0]) + width_range[0]
+            std_values = low_samples + torch.rand(n_samples) * width_samples
 
         return std_values.detach()
 
