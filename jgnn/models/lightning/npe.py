@@ -205,7 +205,7 @@ class NPE(pl.LightningModule):
             self.parameters(), self.optimizer_args, self.scheduler_args)
 
     @torch.no_grad()
-    def sample_from_batch(self, batch, num_samples, pre_transforms=None):
+    def sample_from_batch(self, batch, num_samples, pre_transforms=None, return_embedding=False):
         """Sample from the posterior distribution for a given batch.
 
         Args:
@@ -213,8 +213,10 @@ class NPE(pl.LightningModule):
             num_samples: Number of posterior samples to draw per input
             pre_transforms: Optional data transformations to apply. If given,
                             these will override the model's pre_transforms.
+            return_embedding: If True, also return the embedding along with the posterior samples.
         Returns:
             torch.Tensor: Posterior samples of shape (batch_size, num_samples, output_size)
+            (optional) torch.Tensor: Embedding of shape (batch_size, embedding_output_size)
         """
         self.eval()
 
@@ -228,10 +230,14 @@ class NPE(pl.LightningModule):
         embedding = self.forward(batch)
         posterior = self.flows(embedding).sample((num_samples, ))  # (num_samples, batch_size, output_size)
         posterior = posterior.transpose(0, 1) # (batch_size, num_samples, output_size)
+
+        if return_embedding:
+            return posterior, embedding
         return posterior
 
     @torch.no_grad()
-    def sample_from_loader(self, loader, num_samples, pre_transforms=None, verbose=True):
+    def sample_from_loader(
+        self, loader, num_samples, pre_transforms=None, verbose=True, return_embedding=False):
         """Sample from the posterior distribution for all data in a DataLoader.
 
         Args:
@@ -245,9 +251,15 @@ class NPE(pl.LightningModule):
         """
         self.eval()
         posteriors = []
+        embeddings = []
         for batch in tqdm(loader, disable=not verbose):
-            posterior = self.sample_from_batch(
-                batch, num_samples, pre_transforms=pre_transforms)
+            posterior, embedding = self.sample_from_batch(
+                batch, num_samples, pre_transforms=pre_transforms, return_embedding=True)
             posteriors.append(posterior.cpu())
+            embeddings.append(embedding.cpu())
+
         posteriors = torch.cat(posteriors, dim=0)
+        if return_embedding:
+            embeddings = torch.cat(embeddings, dim=0)
+            return posteriors, embeddings
         return posteriors
