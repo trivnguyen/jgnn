@@ -17,6 +17,7 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
+from pytorch_lightning.utilities.model_summary import summarize
 import torch
 from absl import flags
 from ml_collections import config_flags
@@ -362,6 +363,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     # Create model
     print("[Model] Creating NPE model...")
     model = create_model(config, pre_transforms, norm_dict)
+    summary = summarize(model, max_depth=3)
 
     # Print trainable vs frozen parameters
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -371,7 +373,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     print(f"[Model] Frozen parameters: {frozen_params:,}")
 
     # this watches all parameters and gradients
-    wandb_logger.watch(model, log="all", log_freq=500, log_graph=True)
+    wandb_logger.watch(model, log="all", log_freq=1000, log_graph=False)
 
     # Get checkpoint path if resuming
     if resume_training:
@@ -396,6 +398,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         logger=wandb_logger,
         enable_progress_bar=config.get("enable_progress_bar", True),
         gradient_clip_val=config.get('gradient_clip_val', None),
+        num_sanity_val_steps=0
     )
 
     # Set random seed for training
