@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import torch
 from torch_geometric.data import Data, Batch
+from pytorch_lightning.utilities.model_summary import summarize
 
 from ml_collections import ConfigDict
 
@@ -233,3 +234,70 @@ def load_observation(
 
     batch = Batch.from_data_list([graph])  # create a batch with a single graph (batch_size=1)
     return batch, data_dict
+
+
+def load_npe_from_checkpoint(
+    config, checkpoint_path: str, return_norm_dict: bool = True,
+    map_location: str = 'cpu', verbose: bool = True
+):
+    """Load Neural Probability Estimator (NPE) model from checkpoint.
+
+    Parameters
+    ----------
+    config : ConfigDict
+        Model configuration
+    checkpoint_path : str
+        Path to the checkpoint file
+    return_norm_dict : bool, optional
+        Whether to return normalization dictionary, by default True
+    map_location : str, optional
+        Device to load the model on, by default 'cpu'
+    verbose : bool, optional
+        Whether to print model summary, by default True
+
+    Returns
+    -------
+    npe : NPE
+        Loaded NPE model
+    norm_dict : dict, optional
+        Normalization dictionary (if return_norm_dict=True)
+    """
+    # need to import here to avoid circular dependencies
+    from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
+
+    embedding_type = config.model.embedding.get('type', 'gnn')
+    if embedding_type == 'transformer':
+        embedding_nn = TransformerEmbedding(
+            input_size=config.model.input_size,
+            transformer_args=config.model.embedding.transformer,
+            mlp_args=config.model.embedding.mlp,
+        )
+    elif embedding_type == 'gnn':
+        embedding_nn = GNNEmbedding(
+            input_size=config.model.input_size,
+            gnn_args=config.model.embedding.gnn,
+            mlp_args=config.model.embedding.mlp,
+            conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
+        )
+    else:
+        raise ValueError(f"Unknown embedding type: {embedding_type}")
+
+    npe = NPE(
+        input_size=config.model.input_size,
+        output_size=config.model.output_size,
+        flows_args=config.model.flows,
+        embedding_nn=embedding_nn,
+    )
+    npe.eval()
+
+    if verbose:
+        print(summarize(npe, max_depth=3))
+
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    npe.load_state_dict(checkpoint['state_dict'])
+
+    if return_norm_dict:
+        norm_dict = checkpoint['hyper_parameters']['norm_dict']
+        return npe, norm_dict
+
+    return npe
