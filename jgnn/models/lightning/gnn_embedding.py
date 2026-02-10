@@ -122,8 +122,14 @@ class GNNEmbedding(pl.LightningModule):
         # Add conditional features if provided
         if self.conditional_mlp is not None:
             cond_embedding = self.conditional_mlp(batch_dict['cond'])
-            embedding = embedding + cond_embedding
-
+            try:
+                embedding = embedding + cond_embedding
+            except:
+                raise ValueError(
+                    "Mismatch in embedding and conditional embedding shapes. "
+                    f"{embedding.shape}, 'cond_embedding': {cond_embedding.shape}"
+                    f"{batch_dict['batch_size']}, {max(batch_dict['batch'])}"
+                )
         return embedding
 
     def _prepare_batch(self, batch):
@@ -149,6 +155,7 @@ class GNNEmbedding(pl.LightningModule):
             - 'cond': Optional conditioning variables
             - 'batch_size': Batch size
         """
+        # check for duplicate in batch.ptr
         batch = self.pre_transforms(batch) if self.pre_transforms else batch
         batch = batch.to(self.device)
 
