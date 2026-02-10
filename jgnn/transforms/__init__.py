@@ -3,15 +3,31 @@ import torch
 from torch_geometric import transforms as T
 
 from .basic import GetNodeFeatures, Normalize
+from .graph import ALL_GRAPHS, AdaptiveKNNGraph
 from .projection import RandomProjection
-from .selection_function import RadialSelectionFunction, RandomSelectionStrategy
-from .selection_function import ExponentialSelectionFunction, LinearSelectionFunction
+from .selection_function import (
+    BaseSelectionFunction,
+    RadialSelectionFunction,
+    RandomSelectionStrategy,
+    ExponentialSelectionFunction,
+    LinearSelectionFunction,
+)
 from .uncertainty import UncertaintySampler
 
-ALL_GRAPHS = {
-    "knn": T.KNNGraph,
-    "radius": T.RadiusGraph,
-}
+__all__ = [
+    'GetNodeFeatures',
+    'Normalize',
+    'ALL_GRAPHS',
+    'AdaptiveKNNGraph',
+    'RandomProjection',
+    'BaseSelectionFunction',
+    'RadialSelectionFunction',
+    'RandomSelectionStrategy',
+    'ExponentialSelectionFunction',
+    'LinearSelectionFunction',
+    'UncertaintySampler',
+    'build_transformation',
+]
 
 def build_transformation(
     apply_graph: bool = True,
@@ -37,7 +53,8 @@ def build_transformation(
     if apply_selection:
         if selection_args is None:
             raise ValueError('`selection_args` must be provided when `apply_selection` is True.')
-        transforms.append(RadialSelectionFunction(**selection_args))
+        # transforms.append(RadialSelectionFunction(**selection_args))
+        transforms.append(RandomSelectionStrategy(**selection_args))
     if apply_projection or apply_selection:
         # only recompute node features if projection or selection is applied
         transforms.append(GetNodeFeatures(log=use_log_features))

@@ -61,6 +61,17 @@ class UncertaintySampler:
                 raise ValueError("'low_range[0]' must be <= 'low_range[1]'")
             if params['width_range'][0] > params['width_range'][1]:
                 raise ValueError("'width_range[0]' must be <= 'width_range[1]'")
+        elif distribution_type == 'jeffreys_varied':
+            if 'low_range' not in params or 'width_range' not in params:
+                raise ValueError("Uniform distribution requires 'low_range' and 'width_range' parameters")
+            if params['low_range'][0] <= 0 or params['low_range'][1] <= 0:
+                raise ValueError("`low_range` values must be positive")
+            if params['width_range'][0] <= 0 or params['width_range'][1] <= 0:
+                raise ValueError("`width_range` values must be positive")
+            if params['low_range'][0] > params['low_range'][1]:
+                raise ValueError("'low_range[0]' must be <= 'low_range[1]'")
+            if params['width_range'][0] > params['width_range'][1]:
+                raise ValueError("'width_range[0]' must be <= 'width_range[1]'")
         else:
             raise ValueError(f"Unknown distribution type: {distribution_type}")
 
@@ -78,7 +89,6 @@ class UncertaintySampler:
             low = self.params['low']
             high = self.params['high']
             std_values = torch.rand(n_samples) * (high - low) + low
-
         elif self.distribution_type == 'gaussian':
             mean = self.params['mean']
             std = self.params['std']
@@ -120,9 +130,24 @@ class UncertaintySampler:
             low_range = self.params['low_range']
             width_range = self.params['width_range']
 
-            low_samples = torch.rand(n_samples) * (low_range[1] - low_range[0]) + low_range[0]
-            width_samples = torch.rand(n_samples) * (width_range[1] - width_range[0]) + width_range[0]
+            # ensure that high and low are sampled once per batch
+            low_samples = torch.rand(1) * (low_range[1] - low_range[0]) + low_range[0]
+            width_samples = torch.rand(1) * (width_range[1] - width_range[0]) + width_range[0]
             std_values = low_samples + torch.rand(n_samples) * width_samples
+        elif self.distribution_type == 'jeffreys_varied':
+            low_range = self.params['low_range']
+            width_range = self.params['width_range']
+
+            # ensure that high and low are sampled once per batch
+            low_samples = torch.rand(1) * (low_range[1] - low_range[0]) + low_range[0]
+            width_samples = torch.rand(1) * (width_range[1] - width_range[0]) + width_range[0]
+            log_low_samples = torch.log(low_samples)
+            log_high_samples = torch.log(low_samples + width_samples)
+
+            log_std_values = torch.rand(n_samples) * (log_high_samples - log_low_samples) + log_low_samples
+            std_values = torch.exp(log_std_values)
+        else:
+            raise ValueError(f"Unknown distribution type: {self.distribution_type}")
 
         return std_values.detach()
 
