@@ -34,54 +34,49 @@ class GNNBlock(nn.Module):
         self._setup_model()
 
     def _setup_model(self):
-        if self.layer_name == "ChebConv":
-            self.has_edge_attr = False
-            self.has_edge_weight = True
-            self.graph_layer =  gnn.ChebConv(
-                self.input_size, self.output_size, **self.layer_params)
-        elif self.layer_name == "GCNConv":
-            self.has_edge_attr = False
-            self.has_edge_weight = True
-            self.graph_layer =  gnn.GCNConv(
-                self.input_size, self.output_size, **self.layer_params)
-        elif self.layer_name == "SAGEConv":
-            self.has_edge_attr = False
-            self.has_edge_weight = False
-            self.graph_layer =  gnn.SAGEConv(
-                self.input_size, self.output_size, **self.layer_params)
-        elif self.layer_name == "GATConv":
-            self.has_edge_attr = True
-            self.has_edge_weight = False
-            self.graph_layer =  gnn.GATConv(
-                self.input_size, self.output_size, concat=False,  # only work with concat=False
-                **self.layer_params)
-        elif self.layer_name == "APPNP":
-            self.has_edge_attr = False
-            self.has_edge_weight = True
-            self.graph_layer = gnn.APPNP(
-                self.layer_params.get('K', 10),
-                self.layer_params.get('alpha', 0.1)
-            )
-        elif self.layer_name == "SGConv":
-            self.has_edge_attr = False
-            self.has_edge_weight = True
-            self.graph_layer = gnn.SGConv(
-                self.input_size, self.output_size,
-                K=self.layer_params.get('K', 2),
-                cached=self.layer_params.get('cached', False)
-            )
+        # Registry: layer_name -> (has_edge_attr, has_edge_weight, factory)
+        registry = {
+            "ChebConv": (False, True, lambda: gnn.ChebConv(
+                self.input_size, self.output_size, **self.layer_params)),
+            "GCNConv": (False, True, lambda: gnn.GCNConv(
+                self.input_size, self.output_size, **self.layer_params)),
+            "SAGEConv": (False, False, lambda: gnn.SAGEConv(
+                self.input_size, self.output_size, **self.layer_params)),
+            "GATConv": (True, False, lambda: gnn.GATConv(
+                self.input_size, self.output_size, concat=False, **self.layer_params)),
+            "APPNP": (False, True, lambda: gnn.APPNP(**self.layer_params)),
+            "SGConv": (False, True, lambda: gnn.SGConv(
+                self.input_size, self.output_size, **self.layer_params)),
+        }
 
+        if self.layer_name == "GPSChebConv":
+            if self.input_size != self.output_size:
+                raise ValueError(
+                    "For GPSConv, input_size must be equal to output_size. "
+                    f"Got input_size={self.input_size}, output_size={self.output_size}."
+                )
+            layer_params = dict(self.layer_params)
+            conv_params = layer_params.pop("conv_params")
+            self.graph_layer = gnn.conv.GPSConv(
+                channels=self.input_size,
+                conv=gnn.ChebConv(self.input_size, self.output_size, **conv_params),
+                **layer_params
+            )
+            self.has_edge_attr, self.has_edge_weight = False, True
+        elif self.layer_name in registry:
+            self.has_edge_attr, self.has_edge_weight, factory = registry[self.layer_name]
+            self.graph_layer = factory()
         else:
-            raise ValueError(f"Unknown graph layer: {layer_name}")
+            raise ValueError(f"Unknown graph layer: {self.layer_name}")
 
         if self.layer_norm:
             self.norm = gnn.norm.LayerNorm(self.output_size)
 
     def forward(self, x, edge_index, edge_attr=None, edge_weight=None):
         if self.has_edge_attr:
-            x = self.graph_layer(x, edge_index, edge_attr)
+            x = self.graph_layer(x, edge_index, edge_attr=edge_attr)
         elif self.has_edge_weight:
-            x = self.graph_layer(x, edge_index, edge_weight)
+            x = self.graph_layer(x, edge_index, edge_weight=edge_weight)
         else:
             x = self.graph_layer(x, edge_index)
 
