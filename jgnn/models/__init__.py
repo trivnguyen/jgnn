@@ -2,7 +2,7 @@
 
 from .layers import GNN, GNNBlock, MLP, Transformer, MultiHeadAttentionBlock
 from .flows import build_flows
-from .lightning import GNNEmbedding, TransformerEmbedding, NPE, SequentialNPE
+from .lightning import GNNEmbedding, TransformerEmbedding, NPE, SequentialNPE, NRE
 from .utils import get_activation, configure_optimizers, build_embedding_loss
 
 __all__ = [
@@ -15,6 +15,7 @@ __all__ = [
     'TransformerEmbedding',
     'NPE',
     'SequentialNPE',
+    'NRE',
     'build_flows',
     'get_activation',
     'configure_optimizers',
