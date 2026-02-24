@@ -301,3 +301,69 @@ def load_npe_from_checkpoint(
         return npe, norm_dict
 
     return npe
+
+
+def load_nre_from_checkpoint(
+    config, checkpoint_path: str, return_norm_dict: bool = True,
+    map_location: str = 'cpu', verbose: bool = True
+):
+    """Load Neural Ratio Estimator (NRE) model from checkpoint.
+
+    Parameters
+    ----------
+    config : ConfigDict
+        Model configuration
+    checkpoint_path : str
+        Path to the checkpoint file
+    return_norm_dict : bool, optional
+        Whether to return normalization dictionary, by default True
+    map_location : str, optional
+        Device to load the model on, by default 'cpu'
+    verbose : bool, optional
+        Whether to print model summary, by default True
+
+    Returns
+    -------
+    nre : NRE
+        Loaded NRE model
+    norm_dict : dict, optional
+        Normalization dictionary (if return_norm_dict=True)
+    """
+    # need to import here to avoid circular dependencies
+    from jgnn.models import NRE, GNNEmbedding, TransformerEmbedding
+
+    embedding_type = config.model.embedding.get('type', 'gnn')
+    if embedding_type == 'transformer':
+        embedding_nn = TransformerEmbedding(
+            input_size=config.model.input_size,
+            transformer_args=config.model.embedding.transformer,
+            mlp_args=config.model.embedding.mlp,
+        )
+    elif embedding_type == 'gnn':
+        embedding_nn = GNNEmbedding(
+            input_size=config.model.input_size,
+            gnn_args=config.model.embedding.gnn,
+            mlp_args=config.model.embedding.mlp,
+            conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
+        )
+    else:
+        raise ValueError(f"Unknown embedding type: {embedding_type}")
+
+    nre = NRE(
+        input_size=config.model.input_size,
+        output_size=config.model.output_size,
+        embedding_nn=embedding_nn,
+    )
+    nre.eval()
+
+    if verbose:
+        print(summarize(nre, max_depth=3))
+
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    nre.load_state_dict(checkpoint['state_dict'])
+
+    if return_norm_dict:
+        norm_dict = checkpoint['hyper_parameters']['norm_dict']
+        return nre, norm_dict
+
+    return nre
