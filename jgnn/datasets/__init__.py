@@ -103,6 +103,10 @@ def read_datasets(
             for k in graphs:
                 graph_feats[k] = [] if i == init else graph_feats[k]
                 graph_feats[k].append(graphs[k])
+
+        if len(node_feats) == 0 or len(graph_feats) == 0:
+            raise ValueError(f"No valid datasets found in {root}/{name} with init={init} and num_datasets={num_datasets}.")
+
         # concatenate the datasets
         for k in node_feats:
             node_feats[k] = np.concatenate(node_feats[k])
