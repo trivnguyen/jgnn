@@ -1,5 +1,15 @@
+# Workspace directory (personal development)
+workspace/
+
+# Experiment outputs (if any escape to other locations)
+runs/
+artifacts/
+mlruns/
+
+# Legacy entries
 slurm
 train_debug.py
+notebooks
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

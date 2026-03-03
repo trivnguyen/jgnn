@@ -16,7 +16,7 @@ class GetNodeFeatures:
         return batch
 
 class Normalize:
-    """ Extract node features from the input batch """
+    """ Normalize node features using mean and standard deviation """
     def __init__(self, x_loc=0, x_scale=1):
         # Convert inputs to tensors if they aren't already
         if not isinstance(x_loc, torch.Tensor):

@@ -1,26 +1,83 @@
 
 import torch
+from abc import ABC, abstractmethod
 from torch_geometric.data import Data, Batch
 
-def apply_mask(batch, mask):
-    """Apply a boolean mask to all relevant attributes of the batch."""
+
+class BaseSelectionFunction(ABC):
+    """Base class for selection functions that filter nodes based on radial distance."""
+
+    def __call__(self, batch):
+        batch = batch.clone()
+        n_graph = batch.num_graphs
+        radii = torch.norm(batch.pos, dim=1)
+
+        # Compute per-graph selection probabilities
+        selection_probs = []
+        for i in range(n_graph):
+            graph_radii = radii[batch.ptr[i]:batch.ptr[i + 1]]
+            graph_probs = self._compute_selection_probs(graph_radii, i, n_graph)
+            selection_probs.append(graph_probs)
+
+        all_probs = torch.cat(selection_probs, dim=0)
+
+        # Generate random values and create mask
+        random_vals = torch.rand(batch.num_nodes, device=batch.pos.device)
+        mask = random_vals < all_probs
+
+        return apply_mask(batch, mask)
+
+    @abstractmethod
+    def _compute_selection_probs(self, graph_radii, graph_idx, n_graph):
+        """Compute selection probabilities for nodes in a single graph.
+
+        Args:
+            graph_radii: Tensor of radii for nodes in this graph
+            graph_idx: Index of this graph in the batch
+            n_graph: Total number of graphs in the batch
+
+        Returns:
+            Tensor of selection probabilities for each node
+        """
+        pass
+
+
+def apply_mask(batch, mask, min_nodes=1):
+    """Apply a boolean mask to all relevant attributes of the batch.
+
+    Args:
+        batch: PyG Batch object
+        mask: Boolean mask for nodes to keep
+        min_nodes: Minimum number of nodes to keep per graph (default: 1).
+                   If fewer nodes would remain, randomly keeps min_nodes nodes.
+    """
     data_list = []
     for i in range(batch.num_graphs):
         node_start, node_end = batch.ptr[i], batch.ptr[i + 1]
         graph_mask = mask[node_start:node_end]
+
+        # Safeguard: ensure at least min_nodes are kept
+        num_kept = graph_mask.sum().item()
+        num_nodes = graph_mask.shape[0]
+        if num_kept < min_nodes and num_nodes >= min_nodes:
+            # Randomly select min_nodes indices to keep
+            keep_indices = torch.randperm(num_nodes)[:min_nodes]
+            graph_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            graph_mask[keep_indices] = True
+
         graph_data = batch[i]
         graph_data = Data(
             x=graph_data.x[graph_mask],
             pos=graph_data.pos[graph_mask],
             vel=graph_data.vel[graph_mask],
             theta=graph_data.theta,
-            cond=graph_data.cond,
+            cond=graph_data.get('cond', None)
         )
         data_list.append(graph_data)
     batch = Batch.from_data_list(data_list)
     return batch
 
-class ExponentialSelectionFunction:
+class ExponentialSelectionFunction(BaseSelectionFunction):
     """ Selection function with exponential decay probability based on radial distance """
     def __init__(self, alpha_range=(0.1, 2.0), norm_range=(0.5, 1.0)):
         """
@@ -32,6 +89,8 @@ class ExponentialSelectionFunction:
         """
         self.alpha_range = alpha_range
         self.norm_range = norm_range
+        self._alpha_vals = None
+        self._norm_vals = None
 
         # Validate alpha range
         if not (alpha_range[0] > 0 and alpha_range[0] <= alpha_range[1]):
@@ -48,73 +107,28 @@ class ExponentialSelectionFunction:
             )
 
     def __call__(self, batch):
-        batch = batch.clone()
-        n_per_batch = batch.ptr[1:] - batch.ptr[:-1]
+        # Sample random values for this batch before calling parent
         n_graph = batch.num_graphs
+        self._alpha_vals = (torch.rand(n_graph) *
+                          (self.alpha_range[1] - self.alpha_range[0]) +
+                          self.alpha_range[0])
+        self._norm_vals = (torch.rand(n_graph) *
+                         (self.norm_range[1] - self.norm_range[0]) +
+                         self.norm_range[0])
+        return super().__call__(batch)
 
-        # Calculate radii for all nodes
-        radii = torch.norm(batch.pos, dim=1)
+    def _compute_selection_probs(self, graph_radii, graph_idx, n_graph):
+        alpha = self._alpha_vals[graph_idx]
+        norm = self._norm_vals[graph_idx]
 
-        # Calculate r_min and r_max for each graph
-        r_min_vals = []
-        r_max_vals = []
-        selection_probs = []
+        r_min = torch.min(graph_radii)
+        r_max = torch.max(graph_radii)
 
-        # Sample random alpha and normalization values for each graph
-        alpha_vals = (torch.rand(n_graph) *
-                     (self.alpha_range[1] - self.alpha_range[0]) +
-                     self.alpha_range[0])
-        norm_vals = (torch.rand(n_graph) *
-                    (self.norm_range[1] - self.norm_range[0]) +
-                    self.norm_range[0])
-
-        for i in range(n_graph):
-            # Get radii for current graph
-            graph_radii = radii[batch.ptr[i]:batch.ptr[i + 1]]
-
-            # Calculate r_min and r_max for this graph
-            r_min = torch.min(graph_radii)
-            r_max = torch.max(graph_radii)
-
-            r_min_vals.append(r_min)
-            r_max_vals.append(r_max)
-
-            # Use randomly sampled alpha and normalization for this graph
-            alpha = alpha_vals[i]
-            norm = norm_vals[i]
-
-            # Calculate exponential decay probabilities for this graph
-            if r_max > r_min:
-                # Normalize radii to [0, 1] range: r_norm = (r - r_min) / (r_max - r_min)
-                # Then apply: p(r) = norm * exp(-alpha * r_norm)
-                normalized_radii = (graph_radii - r_min) / (r_max - r_min)
-                graph_probs = norm * torch.exp(-alpha * normalized_radii)
-            else:
-                # All nodes at same radius, probability = norm * exp(-alpha * 0) = norm
-                graph_probs = torch.full_like(graph_radii, norm)
-
-            selection_probs.append(graph_probs)
-
-        # Concatenate all probabilities
-        all_probs = torch.cat(selection_probs, dim=0)
-
-        # Generate random values and create mask
-        random_vals = torch.rand(batch.num_nodes, device=batch.pos.device)
-        mask = random_vals < all_probs
-
-        # Apply mask to all relevant attributes
-        batch.x = batch.x[mask]
-        batch.pos = batch.pos[mask]
-        batch.vel = batch.vel[mask]
-        batch.batch = batch.batch[mask]
-
-        # Recalculate ptr
-        batch.ptr = torch.searchsorted(
-            batch.batch,
-            torch.arange(n_graph+1, device=batch.batch.device)
-        )
-
-        return batch
+        if r_max > r_min:
+            normalized_radii = (graph_radii - r_min) / (r_max - r_min)
+            return norm * torch.exp(-alpha * normalized_radii)
+        else:
+            return torch.full_like(graph_radii, norm)
 
     def get_functional_form(self, N=100, alpha=None, norm=None):
         """
@@ -148,7 +162,7 @@ class ExponentialSelectionFunction:
         return x, y
 
 
-class LinearSelectionFunction:
+class LinearSelectionFunction(BaseSelectionFunction):
     """ Selection function with linear decay probability based on radial distance """
     def __init__(self, p_min_range=(0.0, 0.3), p_max_range=(0.7, 1.0)):
         """
@@ -160,6 +174,8 @@ class LinearSelectionFunction:
         """
         self.p_min_range = p_min_range
         self.p_max_range = p_max_range
+        self._p_min_vals = None
+        self._p_max_vals = None
 
         # Validate probability ranges
         if not (0 <= p_min_range[0] <= p_min_range[1] <= 1):
@@ -179,73 +195,28 @@ class LinearSelectionFunction:
             )
 
     def __call__(self, batch):
-        batch = batch.clone()
-        n_per_batch = batch.ptr[1:] - batch.ptr[:-1]
+        # Sample random values for this batch before calling parent
         n_graph = batch.num_graphs
+        self._p_min_vals = (torch.rand(n_graph) *
+                          (self.p_min_range[1] - self.p_min_range[0]) +
+                          self.p_min_range[0])
+        self._p_max_vals = (torch.rand(n_graph) *
+                          (self.p_max_range[1] - self.p_max_range[0]) +
+                          self.p_max_range[0])
+        return super().__call__(batch)
 
-        # Calculate radii for all nodes
-        radii = torch.norm(batch.pos, dim=1)
+    def _compute_selection_probs(self, graph_radii, graph_idx, n_graph):
+        p_min = self._p_min_vals[graph_idx]
+        p_max = self._p_max_vals[graph_idx]
 
-        # Calculate r_min and r_max for each graph
-        r_min_vals = []
-        r_max_vals = []
-        selection_probs = []
+        r_min = torch.min(graph_radii)
+        r_max = torch.max(graph_radii)
 
-        # Sample random p_min and p_max values for each graph
-        p_min_vals = (torch.rand(n_graph) *
-                     (self.p_min_range[1] - self.p_min_range[0]) +
-                     self.p_min_range[0])
-        p_max_vals = (torch.rand(n_graph) *
-                     (self.p_max_range[1] - self.p_max_range[0]) +
-                     self.p_max_range[0])
-
-        for i in range(n_graph):
-            # Get radii for current graph
-            graph_radii = radii[batch.ptr[i]:batch.ptr[i + 1]]
-
-            # Calculate r_min and r_max for this graph
-            r_min = torch.min(graph_radii)
-            r_max = torch.max(graph_radii)
-
-            r_min_vals.append(r_min)
-            r_max_vals.append(r_max)
-
-            # Use randomly sampled probabilities for this graph
-            p_min = p_min_vals[i]
-            p_max = p_max_vals[i]
-
-            # Calculate linear decay probabilities for this graph
-            if r_max > r_min:
-                # Linear interpolation:
-                # p = p_max + (p_min - p_max) * (r - r_min) / (r_max - r_min)
-                normalized_radii = (graph_radii - r_min) / (r_max - r_min)
-                graph_probs = p_max + (p_min - p_max) * normalized_radii
-            else:
-                # All nodes at same radius, use maximum probability
-                graph_probs = torch.full_like(graph_radii, p_max)
-
-            selection_probs.append(graph_probs)
-
-        # Concatenate all probabilities
-        all_probs = torch.cat(selection_probs, dim=0)
-
-        # Generate random values and create mask
-        random_vals = torch.rand(batch.num_nodes, device=batch.pos.device)
-        mask = random_vals < all_probs
-
-        # # Apply mask to all relevant attributes
-        # batch.x = batch.x[mask]
-        # batch.pos = batch.pos[mask]
-        # batch.vel = batch.vel[mask]
-        # batch.batch = batch.batch[mask]
-        # # Recalculate ptr
-        # batch.ptr = torch.searchsorted(
-        #     batch.batch,
-        #     torch.arange(n_graph+1, device=batch.batch.device)
-        # )
-
-        # Apply mask to all relevant attributes
-        return apply_mask(batch, mask)
+        if r_max > r_min:
+            normalized_radii = (graph_radii - r_min) / (r_max - r_min)
+            return p_max + (p_min - p_max) * normalized_radii
+        else:
+            return torch.full_like(graph_radii, p_max)
 
     def get_functional_form(self, N=100, p_min=None, p_max=None):
         """
@@ -280,70 +251,97 @@ class LinearSelectionFunction:
 
 
 class RadialSelectionFunction:
-    """ Selection function with various modes """
-    def __init__(self, q_min, q_max, mode):
-        self.q_min = q_min
-        self.q_max = q_max
+    """Selection function that drops nodes based on radial distance or randomly.
+
+    The dropout_rate parameter is consistent across all modes: it always represents
+    the fraction of nodes to drop (like standard dropout).
+
+    Modes:
+        - 'drop_outer': Drop nodes with large radii (outer nodes). Keeps inner nodes.
+        - 'drop_inner': Drop nodes with small radii (inner nodes). Keeps outer nodes.
+        - 'random': Drop nodes randomly (standard dropout behavior).
+        - 'identity': Keep all nodes (no dropout).
+
+    Examples:
+        - dropout_rate=0.2, mode='drop_outer' → drops 20% of nodes (those with largest radii)
+        - dropout_rate=0.2, mode='drop_inner' → drops 20% of nodes (those with smallest radii)
+        - dropout_rate=0.2, mode='random' → drops 20% of nodes randomly
+    """
+
+    def __init__(self, dropout_min, dropout_max, mode):
+        """
+        Args:
+            dropout_min: Minimum dropout rate (fraction of nodes to drop)
+            dropout_max: Maximum dropout rate (fraction of nodes to drop)
+            mode: One of 'drop_outer', 'drop_inner', 'random', or 'identity'
+        """
+        self.dropout_min = dropout_min
+        self.dropout_max = dropout_max
         self.mode = mode
 
-        # check if q_min and q_max are valid
-        if not (0 <= q_min <= 1):
-            raise ValueError(f"q_min should be in [0, 1], but got {q_min}")
-        if not (0 <= q_max <= 1):
-            raise ValueError(f"q_max should be in [0, 1], but got {q_max}")
-        if q_min > q_max:
-            raise ValueError(f"q_min should be smaller than q_max, but got {q_min} > {q_max}")
+        if not (0 <= dropout_min <= 1):
+            raise ValueError(f"dropout_min should be in [0, 1], but got {dropout_min}")
+        if not (0 <= dropout_max <= 1):
+            raise ValueError(f"dropout_max should be in [0, 1], but got {dropout_max}")
+        if dropout_min > dropout_max:
+            raise ValueError(
+                f"dropout_min should be <= dropout_max, but got {dropout_min} > {dropout_max}"
+            )
+        if mode not in ('drop_outer', 'drop_inner', 'random', 'identity'):
+            raise ValueError(
+                f"mode should be one of 'drop_outer', 'drop_inner', 'random', 'identity', "
+                f"but got '{mode}'"
+            )
 
     def __call__(self, batch):
         batch = batch.clone()
         n_per_batch = batch.ptr[1:] - batch.ptr[:-1]
         n_graph = batch.num_graphs
 
-        # Generate random q values between q_min and q_max for each graph
-        q_vals = torch.rand(n_graph) * (self.q_max - self.q_min) + self.q_min
+        # Sample dropout rates for each graph
+        dropout_rates = (
+            torch.rand(n_graph) * (self.dropout_max - self.dropout_min) + self.dropout_min
+        )
 
-        if self.mode == 'dropout':
-            # Use q_vals as dropout probabilities for each graph
-            keep_probs = 1 - q_vals
+        if self.mode == 'identity':
+            return batch
+
+        if self.mode == 'random':
+            # Standard dropout: randomly drop nodes
+            keep_probs = 1 - dropout_rates
             node_rand = torch.rand(batch.num_nodes, device=batch.pos.device)
             graph_keep_probs = torch.repeat_interleave(keep_probs, n_per_batch)
             mask = node_rand < graph_keep_probs
-        elif self.mode == 'identity':
-            # Keep all nodes (identity transform)
-            return batch
         else:
-            # Proceed with quantile-based selection
+            # Radial-based dropout
             radii = torch.norm(batch.pos, dim=1)
-            radii_q = []
+            radii_quantiles = []
+
             for i in range(n_graph):
                 rad = radii[batch.ptr[i]:batch.ptr[i + 1]]
-                rad_q = torch.quantile(rad, q=q_vals[i])
-                radii_q.append(rad_q)
-            radii_q = torch.stack(radii_q, dim=0)
+                dropout_rate = dropout_rates[i]
 
-            # Calculate differences between radii and repeated quantile values
-            diff = radii - torch.repeat_interleave(radii_q, n_per_batch)
+                if self.mode == 'drop_outer':
+                    # Drop outer nodes → keep (1 - dropout_rate) fraction with smallest radii
+                    # Quantile at (1 - dropout_rate) gives the cutoff
+                    quantile = torch.quantile(rad, q=1 - dropout_rate)
+                elif self.mode == 'drop_inner':
+                    # Drop inner nodes → keep (1 - dropout_rate) fraction with largest radii
+                    # Quantile at dropout_rate gives the cutoff
+                    quantile = torch.quantile(rad, q=dropout_rate)
 
-            if self.mode in ('low', 'accept_low'):
-                # For low mode, select negative differences, i.e. take nodes with radius <= quantile
-                mask = diff <= 0
-            elif self.mode in ('high', 'accept_high'):
-                # For high mode, select positive differences, i.e. take nodes with radius >= quantile
-                mask = diff >= 0
-            else:
-                raise ValueError(f"Unknown mode: {self.mode}")
+                radii_quantiles.append(quantile)
 
-        # # Apply mask to all relevant attributes
-        # batch.x = batch.x[mask]
-        # batch.pos = batch.pos[mask]
-        # batch.vel = batch.vel[mask]
-        # batch.batch = batch.batch[mask]
+            radii_quantiles = torch.stack(radii_quantiles, dim=0)
+            thresholds = torch.repeat_interleave(radii_quantiles, n_per_batch)
 
-        # # Recalculate ptr and num nodes
-        # batch.ptr = torch.searchsorted(batch.batch, torch.arange(n_graph+1, device=batch.batch.device))
-        # batch.num_nodes = mask.sum().item()
+            if self.mode == 'drop_outer':
+                # Keep nodes with radius <= threshold
+                mask = radii <= thresholds
+            else:  # drop_inner
+                # Keep nodes with radius >= threshold
+                mask = radii >= thresholds
 
-        # Apply mask to all relevant attributes
         return apply_mask(batch, mask)
 
 
@@ -364,8 +362,12 @@ class RandomSelectionStrategy:
 
         Example:
             selection_configs = [
-                {'type': 'radial', 'params': {'q_min': 0.1, 'q_max': 0.5, 'mode': 'low'}},
-                {'type': 'radial', 'params': {'q_min': 0.3, 'q_max': 0.7, 'mode': 'high'}},
+                {'type': 'radial', 'params': {'dropout_min': 0.1, 'dropout_max': 0.3,
+                                              'mode': 'drop_outer'}},
+                {'type': 'radial', 'params': {'dropout_min': 0.1, 'dropout_max': 0.3,
+                                              'mode': 'drop_inner'}},
+                {'type': 'radial', 'params': {'dropout_min': 0.1, 'dropout_max': 0.3,
+                                              'mode': 'random'}},
                 {'type': 'linear', 'params': {'p_min_range': (0.0, 0.3),
                                               'p_max_range': (0.7, 1.0)}},
                 {'type': 'exponential', 'params': {'alpha_range': (0.1, 2.0),
