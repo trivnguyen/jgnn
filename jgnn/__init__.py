@@ -13,5 +13,5 @@ __all__ = [
     'callbacks',
     'priors',
     'datasets',
-    'utils'
+    'utils',
 ]
