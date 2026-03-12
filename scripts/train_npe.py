@@ -124,26 +124,44 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
 
     Returns:
         Tuple of (train_loader, val_loader, norm_dict)
+
+    Config fields
+    -------------
+    dataset_type : str, default 'cartesian'
+        'cartesian' — 3-D Cartesian phase-space (sample_galaxies.py output)
+                      node features: pos, vel, vel_error
+        'icrs'      — sky-plane ICRS observables (sample_galaxies_target.py output)
+                      node features: ra, dec, vlos, R_proj, vlos_err
     """
+    dataset_type = config.get('dataset_type', 'cartesian')
+    is_directory = config.get('is_directory', True)
+
     # Load datasets
     node_feats, graph_feats = datasets.read_datasets(
         config.data_root,
         config.data_name,
         config.num_datasets,
         init=config.get('init', 0),
+        is_directory=is_directory,
         concat=True
     )
 
-    # Create dataloaders
-    # If we have a norm_dict from embedding, we can reuse it or compute new one
+    # Resolve norm_dict
     if embedding_norm_dict is not None and config.get('reuse_embedding_norm_dict', True):
         print("[Data] Reusing normalization dict from embedding checkpoint")
         norm_dict = embedding_norm_dict
     else:
         norm_dict = None
 
-    # Create dataloaders with existing norm_dict
-    train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
+    # Dispatch to the right dataloader stream
+    if dataset_type == 'icrs':
+        print("[Data] Using ICRS dataset stream (ra/dec/vlos/R_proj)")
+        stream = datasets.icrs
+    else:
+        print("[Data] Using Cartesian dataset stream (pos/vel)")
+        stream = datasets.cartesian
+
+    train_loader, val_loader, norm_dict = stream.prepare_dataloaders(
         node_feats,
         graph_feats,
         config.labels,
