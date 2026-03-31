@@ -127,8 +127,8 @@ class GNNEmbedding(pl.LightningModule):
             except:
                 raise ValueError(
                     "Mismatch in embedding and conditional embedding shapes. "
-                    f"{embedding.shape}, 'cond_embedding': {cond_embedding.shape}"
-                    f"{batch_dict['batch_size']}, {max(batch_dict['batch'])}"
+                    f"{embedding.shape}, 'cond_embedding': {cond_embedding.shape}. "
+                    f"Batch sizes: {batch_dict['batch_size']}, {max(batch_dict['batch'])}"
                 )
         return embedding
 

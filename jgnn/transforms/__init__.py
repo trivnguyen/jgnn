@@ -67,6 +67,7 @@ def build_transformation(
 
     # Normalizing node features
     if norm_dict is not None:
+        print(f"Applying normalization with provided norm_dict: {norm_dict}")
         transforms.append(Normalize(norm_dict['x_loc'], norm_dict['x_scale']))
 
     # Apply graph transformation, connect edges based on the specified graph type

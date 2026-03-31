@@ -25,7 +25,7 @@ from ml_collections import config_flags
 from jgnn import datasets
 from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
 from jgnn.transforms import build_transformation
-from jgnn.callbacks.visualization import NPEVisualizationCallback
+from jgnn.callbacks.visualization import NPEVisualizationCallback, TargetPosteriorCallback
 
 
 def setup_workdir(workdir: str) -> Path:
@@ -304,7 +304,7 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
         LearningRateMonitor(logging_interval="step"),
     ]
 
-    if config.get('enable_visualization_callback', True):
+    if config.get('enable_visualization_callback', False):
         print("[Callbacks] Adding NPE Visualization Callback")
         callbacks.append(
             NPEVisualizationCallback(
@@ -317,6 +317,24 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
                 use_default_mplstyle=config.visualization.get('use_default_mplstyle', True),
             )
         )
+
+        target_vis_cfg = config.visualization.get('target', None)
+        if target_vis_cfg is not None:
+            print("[Callbacks] Adding Target Posterior Callback")
+            callbacks.append(
+                TargetPosteriorCallback(
+                    catalog_path=target_vis_cfg.catalog_path,
+                    meta_key=target_vis_cfg.meta_key,
+                    source=target_vis_cfg.source,
+                    loader_kwargs=dict(target_vis_cfg.get('loader_kwargs', {})),
+                    cond_values=dict(target_vis_cfg.get('cond_values', {})),
+                    cond_labels=list(config.get('cond_labels', [])),
+                    n_posterior_samples=target_vis_cfg.get('n_posterior_samples', 2000),
+                    plot_every_n_epochs=target_vis_cfg.get('plot_every_n_epochs', 1),
+                    param_names=list(target_vis_cfg.get('param_names', config.labels)),
+                    meta_path=target_vis_cfg.get('meta_path', None),
+                )
+            )
 
     return callbacks
 

@@ -123,10 +123,12 @@ def get_config():
     pre_transforms.graph_args = {'ratio': 0.2, 'loop': True}
 
     # -------------------------------------------------------------------------
-    # Visualization callback
+    # Visualization callbacks
     # -------------------------------------------------------------------------
-    config.enable_visualization_callback = True
     config.visualization = visualization = ConfigDict()
+    visualization.enabled = True
+
+    # Simulation diagnostics (TARP / rank / median-vs-true on val set)
     visualization.n_posterior_samples = 500
     visualization.n_val_samples = 200
     visualization.plot_every_n_epochs = 1
@@ -134,6 +136,31 @@ def get_config():
     visualization.plot_median_v_true = True
     visualization.plot_rank = True
     visualization.use_default_mplstyle = True
+
+    # Target posterior — corner plot on real observed data each epoch.
+    # Remove or set visualization.target = None to disable.
+    # cond_values are auto-derived from meta; override only if needed.
+    visualization.target = target_vis = ConfigDict()
+    target_vis.catalog_path = (
+        '/mnt/home/tnguyen/projects/jeans_gnn/dsph_datasets/vr_catalogs/'
+        'walker23-ting/draco_all_3000_walker_04012025.csv')
+    target_vis.meta_key = 'draco_1'
+    target_vis.source = 'walker23'
+    target_vis.loader_kwargs = ConfigDict({
+        'target_system': 'Draco_1',
+        'mem_prob_min': 0.8,
+        'vlos_abs_max': 50.0,
+        'apply_perspective_corr': True,
+    })
+    target_vis.n_posterior_samples = 2000
+    target_vis.plot_every_n_epochs = 1
+    target_vis.param_names = (
+        r'$\gamma$',
+        r'$r_\mathrm{dm}$ [kpc]',
+        r'$\rho_0$ [M$_\odot$ kpc$^{-3}$]',
+        r'$\beta_0$',
+        r'$\log r_a / r_\star$',
+    )
 
     # -------------------------------------------------------------------------
     # Optimizer and scheduler

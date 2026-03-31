@@ -45,11 +45,12 @@ def create_graph_from_icrs(
     vel = torch.tensor(vlos, dtype=torch.float32).view(-1, 1)
     R = torch.tensor(R_proj, dtype=torch.float32).view(-1, 1)
     log_R = torch.log10(R + _LOG_EPS)
-    x = torch.cat([log_R, vel], dim=1)
-
     vel_error = None
     if vlos_err is not None:
         vel_error = torch.tensor(vlos_err, dtype=torch.float32).view(-1, 1)
+        x = torch.cat([log_R, vel, vel_error], dim=1)
+    else:
+        x = torch.cat([log_R, vel], dim=1)
 
     if label is not None:
         label = torch.tensor(label, dtype=torch.float32).view(1, -1)
@@ -128,6 +129,8 @@ def _compute_norm(graphs, cond_labels=None):
 
 def _apply_norm(graphs, norm_dict, device, cond_labels=None):
     """Normalise theta (and cond) in-place from a norm_dict."""
+    # x_loc = torch.tensor(norm_dict['x_loc'], dtype=torch.float32, device=device)
+    # x_scale = torch.tensor(norm_dict['x_scale'], dtype=torch.float32, device=device)
     theta_loc = torch.tensor(norm_dict['theta_loc'], dtype=torch.float32, device=device)
     theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32, device=device)
     if cond_labels:
@@ -135,6 +138,7 @@ def _apply_norm(graphs, norm_dict, device, cond_labels=None):
         cond_scale = torch.tensor(norm_dict['cond_scale'], dtype=torch.float32, device=device)
 
     for g in graphs:
+        # g.x = (g.x - x_loc) / x_scale
         g.theta = (g.theta - theta_loc) / theta_scale
         if cond_labels:
             g.cond = (g.cond - cond_loc) / cond_scale

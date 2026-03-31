@@ -1,8 +1,10 @@
 """Visualization callbacks for NPE training."""
 
-from typing import Optional
+from typing import Optional, Sequence
 
+import astropy.units as u
 import torch
+from torch_geometric.data import Batch
 import pytorch_lightning as pl
 import wandb
 import matplotlib.pyplot as plt
@@ -287,3 +289,236 @@ class NPEVisualizationCallback(pl.Callback):
         mpl.rcParams['grid.color'] = 'black'
         mpl.rcParams['legend.frameon'] = False
         mpl.rcParams['legend.fontsize'] = 12
+
+
+class TargetPosteriorCallback(pl.Callback):
+    """Plot a corner posterior on a real observed dataset each validation epoch.
+
+    Loads the target galaxy catalog once at fit-start using the same
+    kinematic_io pipeline as sample_preprocess_target.py, builds a single
+    PyG Data graph (same icrs.create_graph_from_icrs path), then samples the
+    NPE posterior and logs a corner plot to WandB at regular intervals.
+
+    Args:
+        catalog_path   : Path to the observed kinematic catalog.
+        meta_key       : Galaxy key for kinematic_io.load_meta (e.g. 'draco_1').
+        source         : Catalog source string for load_kinematic_data.
+        loader_kwargs  : Extra kwargs forwarded to load_kinematic_data
+                         (e.g. mem_prob_min, vlos_abs_max).
+        cond_values    : Dict mapping each cond label name to its scalar value
+                         for this galaxy (e.g. {'stellar_log_r_star': -0.64}).
+                         Must match the cond_labels order used during training.
+        cond_labels    : Ordered sequence of cond label names, same as
+                         config.cond_labels used in training.
+        n_posterior_samples : Number of posterior samples to draw each epoch.
+        plot_every_n_epochs : Frequency of plotting.
+        param_names    : Human-readable axis labels for the corner plot, one
+                         per label.  Defaults to the label index numbers.
+        meta_path      : Optional path to a custom meta CSV for load_meta.
+        use_default_mplstyle : Apply the shared rcParams style.
+    """
+
+    def __init__(
+        self,
+        catalog_path: str,
+        meta_key: str,
+        source: str,
+        loader_kwargs: Optional[dict] = None,
+        cond_values: Optional[dict] = None,
+        cond_labels: Optional[Sequence[str]] = None,
+        n_posterior_samples: int = 2000,
+        plot_every_n_epochs: int = 1,
+        param_names: Optional[Sequence[str]] = None,
+        meta_path: Optional[str] = None,
+        use_default_mplstyle: bool = True,
+    ):
+        super().__init__()
+        self.catalog_path = catalog_path
+        self.meta_key = meta_key
+        self.source = source
+        self.loader_kwargs = loader_kwargs or {}
+        self.cond_values = cond_values or {}
+        self.cond_labels = list(cond_labels) if cond_labels else []
+        self.n_posterior_samples = n_posterior_samples
+        self.plot_every_n_epochs = plot_every_n_epochs
+        self.param_names = param_names
+        self.meta_path = meta_path
+        self._graph = None
+
+        if use_default_mplstyle:
+            self._set_mplstyle()
+
+    # ------------------------------------------------------------------
+    # Fit start: load observed data and build the PyG graph once
+    # ------------------------------------------------------------------
+
+    def on_fit_start(self, trainer, pl_module):
+        from dsph_analysis import kinematic_io
+        from jgnn.datasets.icrs import create_graph_from_icrs
+
+        # Load metadata and catalog (same calls as sample_preprocess_target.py)
+        if self.meta_path:
+            meta = kinematic_io.load_meta(self.meta_key, meta_path=self.meta_path)
+        else:
+            meta = kinematic_io.load_meta(self.meta_key)
+
+        data = kinematic_io.load_kinematic_data(
+            self.catalog_path, meta=meta, source=self.source,
+            **self.loader_kwargs)
+
+        # Extract observables
+        ra = data.ra.to_value(u.deg)
+        dec = data.dec.to_value(u.deg)
+        vlos = data.vlos.to_value(u.km / u.s)
+        R_proj = data.R_proj.to_value(u.kpc)
+        vlos_err = data.vlos_err.to_value(u.km / u.s)
+
+        # Ordered cond vector (same ordering as cond_labels in training).
+        # Any label absent from self.cond_values is derived from meta.
+        if self.cond_labels:
+            cond_values = dict(self.cond_values)
+            for label in self.cond_labels:
+                if label not in cond_values:
+                    cond_values[label] = self._cond_from_meta(meta, label)
+            cond = [cond_values[k] for k in self.cond_labels]
+        else:
+            cond = None
+
+        # Build graph — no theta (real data has no ground-truth labels)
+        graph = create_graph_from_icrs(
+            ra, dec, vlos, R_proj, vlos_err=vlos_err,
+            label=None, cond=cond)
+
+        # Apply normalization from the trained model's norm_dict
+        norm_dict = pl_module.norm_dict
+        if norm_dict is not None:
+            # x normalisation (currently identity in icrs.py but respected here)
+            if 'x_loc' in norm_dict:
+                x_loc = torch.tensor(norm_dict['x_loc'], dtype=torch.float32)
+                x_scale = torch.tensor(norm_dict['x_scale'], dtype=torch.float32)
+                graph.x = (graph.x - x_loc) / x_scale
+
+            # cond normalisation
+            if self.cond_labels and graph.cond is not None and 'cond_loc' in norm_dict:
+                cond_loc = torch.tensor(norm_dict['cond_loc'], dtype=torch.float32)
+                cond_scale = torch.tensor(norm_dict['cond_scale'], dtype=torch.float32)
+                graph.cond = (graph.cond - cond_loc) / cond_scale
+
+        self._graph = graph
+        print(f"[TargetPosteriorCallback] Loaded {len(ra)} stars "
+              f"from '{self.meta_key}' ({self.catalog_path})")
+
+    # ------------------------------------------------------------------
+    # Validation epoch end: sample posterior and log corner plot
+    # ------------------------------------------------------------------
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if (trainer.current_epoch + 1) % self.plot_every_n_epochs != 0:
+            return
+        if self._graph is None:
+            return
+
+        device = next(pl_module.parameters()).device
+        batch = Batch.from_data_list([self._graph]).to(device)
+
+        pl_module.eval()
+        with torch.no_grad():
+            # Returns shape (1, n_samples, n_params) in normalised theta space
+            samples_norm = pl_module.sample_from_batch(
+                batch, self.n_posterior_samples)
+
+        # Squeeze the single-galaxy batch dimension → (n_samples, n_params)
+        if samples_norm.dim() == 3:
+            samples_norm = samples_norm.squeeze(0)
+
+        # Denormalise to physical parameter space
+        norm_dict = pl_module.norm_dict
+        theta_loc = torch.tensor(norm_dict['theta_loc'],   dtype=torch.float32)
+        theta_scale = torch.tensor(norm_dict['theta_scale'], dtype=torch.float32)
+        samples_phys = (samples_norm.cpu() * theta_scale + theta_loc).numpy()
+
+        fig = self._plot_corner(samples_phys)
+        if trainer.logger is not None:
+            trainer.logger.experiment.log({
+                'figures/target_posterior': wandb.Image(fig),
+                'epoch': trainer.current_epoch,
+            })
+        plt.close(fig)
+
+    # ------------------------------------------------------------------
+    # Meta → cond value resolver
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _cond_from_meta(meta, label: str) -> float:
+        """Derive a scalar cond value from DwarfMeta for a known label name."""
+        if label == 'stellar_r_star':
+            return meta.rhalf_kpc.value
+        elif label == 'stellar_log_r_star':
+            return float(np.log10(meta.rhalf_kpc.value))
+        elif label == 'log_mwolf':
+            return float(meta.log_mass_wolf)
+        else:
+            raise ValueError(
+                f"Cannot auto-derive cond label '{label}' from meta. "
+                f"Provide it explicitly via cond_values.")
+
+    # ------------------------------------------------------------------
+    # Corner plot
+    # ------------------------------------------------------------------
+
+    def _plot_corner(self, samples: np.ndarray):
+        """Make a corner plot of posterior samples in physical space.
+
+        Uses the ``corner`` package when available; falls back to a plain
+        matplotlib triangle plot otherwise.
+
+        Parameters
+        ----------
+        samples : ndarray, shape (n_posterior_samples, n_params)
+        """
+        n_params = samples.shape[1]
+        labels = (list(self.param_names)
+                  if self.param_names is not None
+                  else [f'param_{i}' for i in range(n_params)])
+
+        try:
+            import corner
+            fig = corner.corner(
+                samples,
+                labels=labels,
+                show_titles=True,
+                title_kwargs={'fontsize': 12},
+                quantiles=[0.16, 0.5, 0.84],
+                title_fmt='.3f',
+            )
+        except ImportError:
+            fig, axes = plt.subplots(
+                n_params, n_params, figsize=(3 * n_params, 3 * n_params))
+            for i in range(n_params):
+                for j in range(n_params):
+                    ax = axes[i, j]
+                    if j > i:
+                        ax.set_visible(False)
+                    elif i == j:
+                        ax.hist(samples[:, i], bins=40, density=True, color='C0')
+                        ax.set_xlabel(labels[i])
+                        q16, q50, q84 = np.percentile(samples[:, i], [16, 50, 84])
+                        ax.set_title(
+                            f'{labels[i]}\n'
+                            f'${q50:.3f}_{{-{q50-q16:.3f}}}^{{+{q84-q50:.3f}}}$',
+                            fontsize=10)
+                    else:
+                        ax.scatter(samples[:, j], samples[:, i],
+                                   s=1, alpha=0.2, color='C0', rasterized=True)
+                        ax.set_xlabel(labels[j])
+                        ax.set_ylabel(labels[i])
+            plt.tight_layout()
+
+        return fig
+
+    def _set_mplstyle(self):
+        mpl.rcParams['font.size'] = 14
+        mpl.rcParams['axes.labelsize'] = 14
+        mpl.rcParams['axes.linewidth'] = 1.5
+        mpl.rcParams['figure.facecolor'] = 'w'
