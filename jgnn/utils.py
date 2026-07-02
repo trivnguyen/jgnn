@@ -293,7 +293,7 @@ def load_npe_from_checkpoint(
     if verbose:
         print(summarize(npe, max_depth=3))
 
-    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
     npe.load_state_dict(checkpoint['state_dict'])
 
     if return_norm_dict:
@@ -359,7 +359,7 @@ def load_nre_from_checkpoint(
     if verbose:
         print(summarize(nre, max_depth=3))
 
-    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    checkpoint = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
     nre.load_state_dict(checkpoint['state_dict'])
 
     if return_norm_dict:
