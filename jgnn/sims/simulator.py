@@ -5,8 +5,8 @@ import warnings
 import numpy as np
 import astropy.units as u
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
-from functools import partial
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from os import cpu_count
 
 # Optional agama import with graceful error handling
 _AGAMA_AVAILABLE = False
@@ -265,32 +265,6 @@ def run_simulation(
     return node_features, graph_features
 
 
-def _run_simulation_worker(args: Tuple[int, Dict, int, int]) -> Tuple[int, Optional[Dict], Optional[Dict]]:
-    """Worker function for multiprocessing simulation.
-
-    Parameters
-    ----------
-    args : tuple
-        Tuple of (index, params, num_stars, max_iter)
-
-    Returns
-    -------
-    index : int
-        Index of the simulation
-    node_features : dict or None
-        Node features if successful, None if failed
-    graph_features : dict or None
-        Graph features if successful, None if failed
-    """
-    index, params, num_stars, max_iter = args
-    try:
-        node_feat, graph_feat = run_simulation(params, num_stars, max_iter=max_iter)
-        return index, node_feat, graph_feat
-    except Exception as e:
-        warnings.warn(f"Simulation {index} failed: {str(e)}")
-        return index, None, None
-
-
 def run_simulation_batch(
     params_list: List[Dict],
     num_stars_list: List[int],
@@ -309,10 +283,11 @@ def run_simulation_batch(
     max_iter : int, optional
         Maximum number of sampling attempts per galaxy (default: 1000)
     n_jobs : int, optional
-        Number of parallel processes to use. If None, uses all available CPUs.
-        Set to 1 to disable multiprocessing. Default: None (use all CPUs)
+        Number of parallel workers to use. If None, uses all available CPUs.
+        Set to 1 to disable parallelism. Default: None (use all CPUs)
     use_multiprocessing : bool, optional
-        Whether to use multiprocessing. If False, runs sequentially. Default: True
+        Whether to run simulations in parallel. If False, runs sequentially.
+        Default: True
 
     Returns
     -------
@@ -331,25 +306,27 @@ def run_simulation_batch(
 
     Notes
     -----
-    Multiprocessing is used by default to speed up simulations. Each simulation
-    runs independently in a separate process. If AGAMA has issues with multiprocessing
-    on your system, set use_multiprocessing=False.
+    Parallelism uses a thread pool, not separate processes: AGAMA releases
+    the GIL during sampling, so threads parallelize correctly within a single
+    process. A process pool would fork AGAMA's internal RNG state into every
+    worker, and (since AGAMA objects aren't passed across the pool boundary
+    here anyway) would only add pickling overhead for no benefit.
     """
 
     num_galaxies = len(params_list)
 
     # Determine number of workers
     if n_jobs is None:
-        n_workers = cpu_count()
+        n_workers = cpu_count() or 1
     else:
         n_workers = min(n_jobs, num_galaxies)
 
-    # Disable multiprocessing if requested or if only 1 job
+    # Disable parallelism if requested or if only 1 job
     if not use_multiprocessing or n_workers == 1:
         n_workers = 1
-        use_mp = False
+        use_parallel = False
     else:
-        use_mp = True
+        use_parallel = True
 
     print(f"[Simulations] Running {num_galaxies} simulations with {n_workers} worker(s)...")
 
@@ -358,24 +335,27 @@ def run_simulation_batch(
     graph_feat_lists = {key: [] for key in []}
     successful_sims = []
 
-    if use_mp:
-        # Multiprocessing mode
-        # Prepare arguments for workers
-        worker_args = [
-            (i, params_list[i], num_stars_list[i], max_iter)
-            for i in range(num_galaxies)
-        ]
+    if use_parallel:
+        results = {}
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {
+                executor.submit(run_simulation, params_list[i], num_stars_list[i], max_iter): i
+                for i in range(num_galaxies)
+            }
+            for future in tqdm(
+                as_completed(futures), total=num_galaxies, desc="Simulating galaxies"
+            ):
+                i = futures[future]
+                try:
+                    results[i] = future.result()
+                except Exception as e:
+                    warnings.warn(f"Simulation {i} failed: {str(e)}")
+                    results[i] = (None, None)
 
-        # Run simulations in parallel
-        with Pool(processes=n_workers) as pool:
-            results = list(tqdm(
-                pool.imap(_run_simulation_worker, worker_args),
-                total=num_galaxies,
-                desc="Simulating galaxies"
-            ))
-
-        # Process results
-        for index, node_feat, graph_feat in results:
+        # Process results in original order so node/graph features stay
+        # aligned with params_list regardless of thread completion order
+        for i in range(num_galaxies):
+            node_feat, graph_feat = results[i]
             if node_feat is not None and graph_feat is not None:
                 all_pos.append(node_feat['pos'])
                 all_vel.append(node_feat['vel'])
@@ -388,7 +368,7 @@ def run_simulation_batch(
                 for key in graph_feat.keys():
                     graph_feat_lists[key].append(graph_feat[key])
 
-                successful_sims.append(index)
+                successful_sims.append(i)
     else:
         # Sequential mode (original implementation)
         for i in tqdm(range(num_galaxies), desc="Simulating galaxies"):
