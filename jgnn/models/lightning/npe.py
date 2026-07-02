@@ -292,3 +292,50 @@ class NPE(pl.LightningModule):
         if len(out) == 1:
             return out[0]
         return tuple(out)
+
+    @torch.no_grad()
+    def logprob_from_batch(self, batch, pre_transforms=None):
+        """Evaluate the log probability of the posterior distribution for a given batch.
+
+        Args:
+            batch: Input batch data
+            pre_transforms: Optional data transformations to apply. If given,
+                            these will override the model's pre_transforms.
+        Returns:
+            torch.Tensor: Log probabilities of shape (batch_size, num_samples)
+        """
+        self.eval()
+
+        # Apply pre-transforms if provided, else fall back to model's pre_transforms
+        if pre_transforms is not None:
+            batch = pre_transforms(batch)
+        elif self.pre_transforms is not None:
+            batch = self.pre_transforms(batch)
+
+        batch = batch.to(self.device)
+        embedding = self.forward(batch)
+        dist = self.flows(embedding)
+        log_prob = dist.log_prob(batch.theta)  # (batch_size,)
+
+        return log_prob
+
+    @torch.no_grad()
+    def logprob_from_loader(self, loader, pre_transforms=None, verbose=True):
+        """Evaluate the log probability of the posterior distribution for all data in a DataLoader.
+
+        Args:
+            loader: DataLoader containing the input data
+            pre_transforms: Optional data transformations to apply. If given,
+                            these will override the model's pre_transforms.
+            verbose: Whether to display a progress bar
+        Returns:
+            torch.Tensor: Log probabilities of shape (num_data,)
+        """
+        self.eval()
+        log_probs = []
+        for batch in tqdm(loader, disable=not verbose):
+            log_prob = self.logprob_from_batch(batch, pre_transforms=pre_transforms)
+            log_probs.append(log_prob.cpu())
+
+        log_probs = torch.cat(log_probs, dim=0)
+        return log_probs
