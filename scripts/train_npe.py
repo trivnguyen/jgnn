@@ -1,9 +1,6 @@
 """Training script for Neural Posterior Estimation (NPE)."""
 
-import os
 import sys
-import shutil
-from pathlib import Path
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -11,56 +8,15 @@ warnings.filterwarnings("ignore", category=UserWarning)
 import wandb
 import ml_collections
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import (
-    EarlyStopping,
-    ModelCheckpoint,
-    LearningRateMonitor,
-)
 from pytorch_lightning.utilities.model_summary import summarize
 import torch
 from absl import flags
 from ml_collections import config_flags
 
-from jgnn import datasets
+from jgnn import datasets, training
 from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
 from jgnn.transforms import build_transformation
 from jgnn.callbacks.visualization import NPEVisualizationCallback, TargetPosteriorCallback
-
-
-def setup_workdir(workdir: str) -> Path:
-    """Set up the working directory for training.
-
-    Args:
-        workdir: Base working directory
-
-    Returns:
-        Path object for the working directory
-    """
-    run_dir = Path(workdir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    return run_dir
-
-
-def get_checkpoint_path(config: ml_collections.ConfigDict, workdir: Path) -> str | None:
-    """Resolve checkpoint path from config.
-
-    Args:
-        config: Configuration dictionary
-        workdir: Working directory path
-
-    Returns:
-        Resolved checkpoint path or None
-    """
-    if config.get('checkpoint') is None:
-        return None
-
-    ckpt = config.checkpoint
-    if os.path.isabs(ckpt):
-        return ckpt
-
-    return str(workdir / 'lightning_logs' / 'checkpoints' / ckpt)
 
 
 def load_embedding_network(
@@ -79,10 +35,8 @@ def load_embedding_network(
     """
     print(f"[Embedding] Loading pre-trained embedding network from: {checkpoint_path}")
 
-    # Load the checkpoint
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
-    # Load the embedding model
     if config.model.embedding.type == 'transformer':
         print(f"[Embedding] Detected TransformerEmbedding model type")
         embedding_nn = TransformerEmbedding.load_from_checkpoint(checkpoint_path)
@@ -93,7 +47,6 @@ def load_embedding_network(
         raise ValueError(
             f"Unsupported embedding model type: {config.model.embedding.type}")
 
-    # Extract norm_dict if available in the hyperparameters
     norm_dict = None
     if 'hyper_parameters' in checkpoint:
         hparams = checkpoint['hyper_parameters']
@@ -101,7 +54,6 @@ def load_embedding_network(
             norm_dict = hparams['norm_dict']
             print(f"[Embedding] Loaded norm_dict from embedding checkpoint")
 
-    # Freeze parameters if requested
     if freeze:
         for param in embedding_nn.parameters():
             param.requires_grad = False
@@ -136,7 +88,6 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
     dataset_type = config.get('dataset_type', 'cartesian')
     is_directory = config.get('is_directory', True)
 
-    # Load datasets
     node_feats, graph_feats = datasets.read_datasets(
         config.data_root,
         config.data_name,
@@ -146,14 +97,12 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
         concat=True
     )
 
-    # Resolve norm_dict
     if embedding_norm_dict is not None and config.get('reuse_embedding_norm_dict', True):
         print("[Data] Reusing normalization dict from embedding checkpoint")
         norm_dict = embedding_norm_dict
     else:
         norm_dict = None
 
-    # Dispatch to the right dataloader stream
     if dataset_type == 'icrs':
         print("[Data] Using ICRS dataset stream (ra/dec/vlos/R_proj)")
         stream = datasets.icrs
@@ -216,6 +165,7 @@ def create_embedding_network(config: ml_collections.ConfigDict):
     else:
         raise ValueError(f"Unsupported embedding model type: {config.model.type}")
 
+
 def create_model(
     config: ml_collections.ConfigDict,
     pre_transforms,
@@ -231,30 +181,23 @@ def create_model(
     Returns:
         NPE model instance
     """
-    # Check if we should load a pre-trained embedding network
     embedding_checkpoint = config.model.embedding.get('checkpoint', None)
     freeze_embedding = config.model.embedding.get('freeze', False)
 
     if embedding_checkpoint is not None:
-        # Load pre-trained embedding network
         embedding_nn, _ = load_embedding_network(
             config,
             embedding_checkpoint,
             freeze=freeze_embedding
         )
     else:
-        # Create new embedding network
         print("[Model] Creating new embedding network...")
         embedding_nn = create_embedding_network(config)
 
-    # Create NPE model
-    # Note: pre_transforms goes to NPE, not embedding_nn
     print("[Model] Creating NPE model...")
-
-    # Check if we should initialize flows from embedding
     init_flows_from_embedding = config.model.get('init_flows_from_embedding', False)
 
-    model = NPE(
+    return NPE(
         input_size=config.model.input_size,
         output_size=config.model.output_size,
         flows_args=config.model.flows,
@@ -266,43 +209,17 @@ def create_model(
         init_flows_from_embedding=init_flows_from_embedding,
     )
 
-    return model
 
-
-def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogger) -> list:
-    """Create PyTorch Lightning callbacks.
+def create_callbacks(config: ml_collections.ConfigDict) -> list:
+    """Create PyTorch Lightning callbacks, including NPE-specific visualization.
 
     Args:
         config: Configuration dictionary
-        wandb_logger: WandB logger instance (used to get checkpoint directory)
 
     Returns:
         List of callback instances
     """
-    # default callbacks
-    callbacks = [
-        EarlyStopping(
-            monitor='val/loss',
-            mode='min',
-            patience=config.patience,
-            verbose=True
-        ),
-        ModelCheckpoint(
-            filename="epoch={epoch}-step={step}-loss={val/loss:.4f}",
-            monitor='val/loss',
-            mode='min',
-            save_top_k=3,  # saves last 3 best checkpoints
-            save_weights_only=False,
-            auto_insert_metric_name=False,
-        ),
-        ModelCheckpoint(
-            filename="last",
-            save_weights_only=False,
-            save_last=True,
-            auto_insert_metric_name=False,
-        ),
-        LearningRateMonitor(logging_interval="step"),
-    ]
+    callbacks = training.create_base_callbacks(config)
 
     if config.get('enable_visualization_callback', False):
         print("[Callbacks] Adding NPE Visualization Callback")
@@ -339,7 +256,6 @@ def create_callbacks(config: ml_collections.ConfigDict, wandb_logger: WandbLogge
     return callbacks
 
 
-
 def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     """Train the NPE model with wandb logging.
 
@@ -347,121 +263,57 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         config: Configuration dictionary containing model and training parameters
         workdir: Working directory for logging and checkpoints
     """
-    # Setup
-    checkpoint_path = None
     resume_training = config.get('checkpoint') is not None
-
     print(f"[Setup] Resume training: {resume_training}")
     print(f"[Setup] Working directory: {workdir}")
 
-    # Setup working directory
-    run_dir = setup_workdir(workdir)
+    run_dir = training.setup_workdir(workdir)
     print(f"[Setup] Run directory: {run_dir}")
 
-    # Initialize wandb logger
-    wandb_mode = 'disabled' if config.get('debug', False) else 'online'
-    print(f"[WandB] Mode: {wandb_mode}")
+    wandb_logger = training.create_wandb_logger(config, run_dir, tag='npe')
 
-    tags = config.get('tags', [])
-    tags.append('npe')
-    wandb_logger = WandbLogger(
-        project=config.get("wandb_project", "jgnn-npe"),
-        name=config.get("name"),
-        entity=config.get("entity", None),
-        id=config.get("id", None),
-        save_dir=str(run_dir),
-        log_model="all",
-        config=config.to_dict(),
-        mode=wandb_mode,
-        resume="allow",
-        tags=list(set(tags))
-    )
-
-    # Load embedding network if specified (to potentially extract norm_dict)
-    embedding_norm_dict = None
-    embedding_checkpoint = config.model.get('embedding_checkpoint', None)
-    if embedding_checkpoint is not None:
-        _, embedding_norm_dict = load_embedding_network(
-            embedding_checkpoint,
-            freeze=False  # Don't freeze yet, just extracting norm_dict
-        )
-
-    # Prepare data
     print("[Data] Loading datasets...")
-    train_loader, val_loader, norm_dict = prepare_data(config, embedding_norm_dict)
+    # norm_dict is None here; if an embedding checkpoint is configured,
+    # create_model() below loads it and returns its norm_dict for reuse.
+    train_loader, val_loader, norm_dict = prepare_data(config)
     print(f"[Data] Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
 
-    # Build pre-transforms (will be passed to NPE, not embedding_nn)
     print("[Transforms] Building pre-transforms...")
     pre_transforms = build_transformation(
         norm_dict=norm_dict, **config.pre_transforms)
 
-    # Create model
     print("[Model] Creating NPE model...")
     model = create_model(config, pre_transforms, norm_dict)
-    summary = summarize(model, max_depth=3)
-
-    # Print trainable vs frozen parameters
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    print(f"[Model] Total parameters: {sum(p.numel() for p in model.parameters()):,}")
-    print(f"[Model] Trainable parameters: {trainable_params:,}")
-    print(f"[Model] Frozen parameters: {frozen_params:,}")
+    summarize(model, max_depth=3)
+    training.report_param_counts(model)
 
     # this watches all parameters and gradients
     wandb_logger.watch(model, log="all", log_freq=1000, log_graph=False)
 
-    # Get checkpoint path if resuming
+    checkpoint_path = None
     if resume_training:
-        checkpoint_path = get_checkpoint_path(config, run_dir)
+        checkpoint_path = training.get_checkpoint_path(config, run_dir)
         print(f"[Checkpoint] Resuming from: {checkpoint_path}")
         print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
-    # Create callbacks (after wandb_logger is initialized)
-    callbacks = create_callbacks(config, wandb_logger)
+    callbacks = create_callbacks(config)
     print(f"[Callbacks] Created {len(callbacks)} callbacks")
 
-    # Create trainer
-    print(f"[Trainer] Max epochs: {config.num_epochs}, Max steps: {config.num_steps}")
-    print(f"[Trainer] Accelerator: {config.accelerator}")
+    trainer = training.build_trainer(
+        config, run_dir, callbacks, wandb_logger, num_sanity_val_steps=0)
 
-    trainer = pl.Trainer(
-        default_root_dir=str(run_dir),
-        max_epochs=config.num_epochs,
-        max_steps=config.num_steps,
-        accelerator=config.accelerator,
-        callbacks=callbacks,
-        logger=wandb_logger,
-        enable_progress_bar=config.get("enable_progress_bar", True),
-        gradient_clip_val=config.get('gradient_clip_val', None),
-        num_sanity_val_steps=0
-    )
-
-    # Set random seed for training
     pl.seed_everything(config.seed_training, workers=True)
     print(f"[Seed] Training seed set to: {config.seed_training}")
 
-    # Train model
-    if checkpoint_path and config.get('reset_optimizer', False):
-        # Load weights only, reset optimizer state
-        print("[Training] Loading model weights with fresh optimizer state")
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
-        model.load_state_dict(checkpoint['state_dict'])
-        trainer.fit(model, train_loader, val_loader)
-    elif checkpoint_path:
-        # Full checkpoint resume
-        print("[Training] Resuming training from full checkpoint")
-        trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
-    else:
-        # Fresh training
-        print(f"[Training] Starting fresh training")
-        trainer.fit(model, train_loader, val_loader)
+    training.fit(
+        trainer, model, train_loader, val_loader,
+        checkpoint_path=checkpoint_path,
+        reset_optimizer=config.get('reset_optimizer', False),
+    )
 
-    print("[Training] Training complete!")
-
-    # Finalize wandb
     wandb.finish()
     print("[WandB] Finished")
+
 
 if __name__ == "__main__":
     FLAGS = flags.FLAGS

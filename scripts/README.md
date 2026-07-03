@@ -4,13 +4,11 @@ Canonical training and inference scripts for JGNN.
 
 ## Scripts
 
-- `train_embed.py` - Train GNN embedding network
+- `train_embed.py` - Train GNN/Transformer embedding network
 - `train_npe.py` - Train Neural Posterior Estimation
-- `train_snpe.py` - Train Sequential NPE
-- `train_optuna_npe.py` - Hyperparameter tuning with Optuna
-- `test_snpe.py` - Test SNPE models
-- `run_simulations.py` - Generate simulation datasets
-- `plotting.py` - Visualization utilities
+
+Shared setup/callback/fit-loop logic lives in `jgnn.training` so both scripts
+stay thin; each script only defines its own data prep and model construction.
 
 ## Usage
 

@@ -6,6 +6,7 @@ from . import callbacks
 from . import priors
 from . import datasets
 from . import utils
+from . import training
 
 __all__ = [
     'models',
@@ -14,4 +15,5 @@ __all__ = [
     'priors',
     'datasets',
     'utils',
+    'training',
 ]
