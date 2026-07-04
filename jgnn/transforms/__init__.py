@@ -38,11 +38,21 @@ def build_transformation(
     graph_args: dict = None,
     projection_args: dict = None,
     selection_args: dict = None,
-    uncertainty_args: dict = None,
+    uncertainty_args = None,
     norm_dict = None,
     use_log_features: bool = True
 ):
-    """ Build a transformation pipeline for graph data. """
+    """
+    Build a transformation pipeline for graph data.
+
+    `uncertainty_args` accepts either a single dict (one uncertainty
+    transform applied to a single feature) or a list of dicts to chain
+    multiple `UncertaintySampler` transforms, each with its own
+    `distribution_type`, `feature_idx`, and parameters. This is useful when
+    `apply_projection` is configured with `use_proper_motions=True`, so that
+    the line-of-sight velocity and the two proper-motion components can
+    each be assigned a different uncertainty distribution.
+    """
 
     transforms = []
     transforms.append(T.ToDevice(device=torch.device("cpu")))  # not gpu-supported yet
@@ -63,7 +73,12 @@ def build_transformation(
     if apply_uncertainty:
         if uncertainty_args is None:
             raise ValueError('`uncertainty_args` must be provided when `apply_uncertainty` is True.')
-        transforms.append(UncertaintySampler(**uncertainty_args))
+        # allow a single dict or a list of dicts, one per feature (e.g. one
+        # per velocity coordinate), each with its own uncertainty distribution
+        if isinstance(uncertainty_args, dict):
+            uncertainty_args = [uncertainty_args]
+        for args in uncertainty_args:
+            transforms.append(UncertaintySampler(**args))
 
     # Normalizing node features
     if norm_dict is not None:
