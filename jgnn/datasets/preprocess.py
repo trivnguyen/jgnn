@@ -2,11 +2,14 @@
 import torch
 from torch_geometric.data import Data
 
-def create_graph_from_posvel(
-    pos, vel, vel_error=None, label=None, cond=None,
-    use_vel_error=False):
+def create_graph_from_posvel(pos, vel, vel_error=None, label=None, cond=None):
     """
-    Create a PyG graph from position and velocity data.
+    Build a bare PyG graph holding raw Cartesian phase-space data.
+
+    No node features (`x`) are computed here: `GetNodeFeatures`, together
+    with any projection/selection/uncertainty transforms, builds `x` from
+    `pos`/`vel` later in the pre_transform pipeline (see
+    `jgnn.transforms.build_transformation`).
     """
     # convert to tensor
     pos = torch.tensor(pos, dtype=torch.float32)
@@ -30,14 +33,4 @@ def create_graph_from_posvel(
     if cond is not None and cond.dim() == 1:
         cond = cond.view(1, -1)
 
-    # create a PyG graph
-    rad = torch.norm(pos, dim=1).view(-1, 1)
-    log_rad = torch.log10(rad + 1e-6)
-
-    if vel_error is not None and use_vel_error:
-        x = torch.cat([log_rad, vel, vel_error], dim=1)
-    else:
-        x = torch.cat([log_rad,  vel], dim=1)
-    graph = Data(x=x, pos=pos, vel=vel, theta=label, cond=cond)
-
-    return graph
+    return Data(pos=pos, vel=vel, vel_error=vel_error, theta=label, cond=cond)

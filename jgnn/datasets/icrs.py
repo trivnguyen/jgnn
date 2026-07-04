@@ -111,18 +111,18 @@ def _compute_norm(graphs, cond_labels=None):
     theta_scale = (theta_max - theta_min) / 2
 
     norm = {
-        'x_loc': list(x_loc.cpu().numpy()),
-        'x_scale': list(x_scale.cpu().numpy()),
-        'theta_loc': list(theta_loc.cpu().numpy()),
-        'theta_scale': list(theta_scale.cpu().numpy()),
+        'x_loc': x_loc.tolist(),
+        'x_scale': x_scale.tolist(),
+        'theta_loc': theta_loc.tolist(),
+        'theta_scale': theta_scale.tolist(),
     }
 
     if cond_labels:
         cond_all = torch.cat([g.cond for g in graphs], dim=0)
         cond_min = cond_all.min(dim=0)[0]
         cond_max = cond_all.max(dim=0)[0]
-        norm['cond_loc'] = list(((cond_max + cond_min) / 2).cpu().numpy())
-        norm['cond_scale'] = list(((cond_max - cond_min) / 2).cpu().numpy())
+        norm['cond_loc'] = ((cond_max + cond_min) / 2).tolist()
+        norm['cond_scale'] = ((cond_max - cond_min) / 2).tolist()
 
     return norm
 
