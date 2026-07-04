@@ -43,6 +43,7 @@ def prepare_data(config: ml_collections.ConfigDict):
         train_frac=config.train_frac,
         num_workers=config.num_workers,
         seed=config.seed_data,
+        pre_transform_kwargs=dict(config.pre_transforms),
     )
 
     return train_loader, val_loader, norm_dict

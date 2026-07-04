@@ -1,6 +1,9 @@
 """Training script for Neural Posterior Estimation (NPE)."""
 
+import os
 import sys
+
+os.environ['WANDB_DATA_DIR'] = '/scratch/tvnguyen/wandb_data'
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -14,56 +17,9 @@ from absl import flags
 from ml_collections import config_flags
 
 from jgnn import datasets, training
-from jgnn.models import NPE, GNNEmbedding, TransformerEmbedding
+from jgnn.models import NPE, GNNEmbedding
 from jgnn.transforms import build_transformation
-from jgnn.callbacks.visualization import NPEVisualizationCallback, TargetPosteriorCallback
-
-
-def load_embedding_network(
-    config: ml_collections.ConfigDict, checkpoint_path: str, freeze: bool = False):
-    """Load a pre-trained embedding network from checkpoint.
-
-    Args:
-        config: Configuration dictionary
-        checkpoint_path: Path to checkpoint
-        freeze: If True, freeze all parameters of the embedding network
-
-    Returns:
-        Tuple of (embedding_network, norm_dict)
-        - embedding_network: The loaded GNNEmbedding model
-        - norm_dict: The normalization dictionary from the checkpoint (if available)
-    """
-    print(f"[Embedding] Loading pre-trained embedding network from: {checkpoint_path}")
-
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
-
-    if config.model.embedding.type == 'transformer':
-        print(f"[Embedding] Detected TransformerEmbedding model type")
-        embedding_nn = TransformerEmbedding.load_from_checkpoint(checkpoint_path)
-    elif config.model.embedding.type == 'gnn':
-        print(f"[Embedding] Detected GNNEmbedding model type")
-        embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
-    else:
-        raise ValueError(
-            f"Unsupported embedding model type: {config.model.embedding.type}")
-
-    norm_dict = None
-    if 'hyper_parameters' in checkpoint:
-        hparams = checkpoint['hyper_parameters']
-        if 'norm_dict' in hparams:
-            norm_dict = hparams['norm_dict']
-            print(f"[Embedding] Loaded norm_dict from embedding checkpoint")
-
-    if freeze:
-        for param in embedding_nn.parameters():
-            param.requires_grad = False
-        embedding_nn.eval()
-        print(f"[Embedding] Froze all parameters in embedding network")
-
-    print(f"[Embedding] Embedding network loaded successfully")
-    print(f"[Embedding] Output size: {embedding_nn.output_size}")
-
-    return embedding_nn, norm_dict
+from jgnn.callbacks.visualization import NPEVisualizationCallback
 
 
 def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
@@ -85,15 +41,12 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
         'icrs'      — sky-plane ICRS observables (sample_galaxies_target.py output)
                       node features: ra, dec, vlos, R_proj, vlos_err
     """
-    dataset_type = config.get('dataset_type', 'cartesian')
-    is_directory = config.get('is_directory', True)
-
     node_feats, graph_feats = datasets.read_datasets(
         config.data_root,
         config.data_name,
         config.num_datasets,
         init=config.get('init', 0),
-        is_directory=is_directory,
+        is_directory=True,
         concat=True
     )
 
@@ -103,14 +56,7 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
     else:
         norm_dict = None
 
-    if dataset_type == 'icrs':
-        print("[Data] Using ICRS dataset stream (ra/dec/vlos/R_proj)")
-        stream = datasets.icrs
-    else:
-        print("[Data] Using Cartesian dataset stream (pos/vel)")
-        stream = datasets.cartesian
-
-    train_loader, val_loader, norm_dict = stream.prepare_dataloaders(
+    train_loader, val_loader, norm_dict = datasets.cartesian.prepare_dataloaders(
         node_feats,
         graph_feats,
         config.labels,
@@ -120,10 +66,49 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
         train_frac=config.train_frac,
         num_workers=config.num_workers,
         seed=config.seed_data,
-        norm_dict=norm_dict
+        norm_dict=norm_dict,
+        pre_transform_kwargs=dict(config.pre_transforms),
     )
 
     return train_loader, val_loader, norm_dict
+
+
+def load_embedding_network(
+    config: ml_collections.ConfigDict, checkpoint_path: str, freeze: bool = False):
+    """Load a pre-trained embedding network from checkpoint.
+
+    Args:
+        config: Configuration dictionary
+        checkpoint_path: Path to checkpoint
+        freeze: If True, freeze all parameters of the embedding network
+
+    Returns:
+        Tuple of (embedding_network, norm_dict)
+        - embedding_network: The loaded GNNEmbedding model
+        - norm_dict: The normalization dictionary from the checkpoint (if available)
+    """
+    print(f"[Embedding] Loading pre-trained embedding network from: {checkpoint_path}")
+
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
+    norm_dict = None
+
+    if 'hyper_parameters' in checkpoint:
+        hparams = checkpoint['hyper_parameters']
+        if 'norm_dict' in hparams:
+            norm_dict = hparams['norm_dict']
+            print(f"[Embedding] Loaded norm_dict from embedding checkpoint")
+
+    if freeze:
+        for param in embedding_nn.parameters():
+            param.requires_grad = False
+        embedding_nn.eval()
+        print(f"[Embedding] Froze all parameters in embedding network")
+
+    print(f"[Embedding] Embedding network loaded successfully")
+    print(f"[Embedding] Output size: {embedding_nn.output_size}")
+
+    return embedding_nn, norm_dict
 
 
 def create_embedding_network(config: ml_collections.ConfigDict):
@@ -135,35 +120,21 @@ def create_embedding_network(config: ml_collections.ConfigDict):
     Returns:
         Embedding network instance
     """
+    print("[Embedding] Creating GNN Embedding model...")
+
     model_type = config.model.embedding.get('type', 'gnn')
-    if model_type == 'gnn':
-        print("[Model] Creating GNN Embedding model...")
-        return GNNEmbedding(
-            input_size=config.model.input_size,
-            gnn_args=config.model.embedding.gnn,
-            mlp_args=config.model.embedding.mlp,
-            loss_type=config.model.embedding.get('loss_type', 'mse'),
-            loss_args=config.model.embedding.get('loss_args', None),
-            conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
-            # NPE handles optimizer, scheduler, and pre_transforms
-            optimizer_args=None,
-            scheduler_args=None,
-            pre_transforms=None,
-        )
-    elif model_type == 'transformer':
-        print("[Model] Creating Transformer Embedding model...")
-        return TransformerEmbedding(
-            input_size=config.model.input_size,
-            transformer_args=config.model.embedding.transformer,
-            loss_type=config.model.embedding.get('loss_type', 'mse'),
-            loss_args=config.model.embedding.get('loss_args', None),
-            mlp_args=config.model.embedding.get('mlp', None),
-            optimizer_args=None,
-            scheduler_args=None,
-            pre_transforms=None,
-        )
-    else:
-        raise ValueError(f"Unsupported embedding model type: {config.model.type}")
+    return GNNEmbedding(
+        input_size=config.model.input_size,
+        gnn_args=config.model.embedding.gnn,
+        mlp_args=config.model.embedding.mlp,
+        loss_type=config.model.embedding.get('loss_type', 'mse'),
+        loss_args=config.model.embedding.get('loss_args', None),
+        conditional_mlp_args=config.model.embedding.get('conditional_mlp', None),
+        # NPE handles optimizer, scheduler, and pre_transforms
+        optimizer_args=None,
+        scheduler_args=None,
+        pre_transforms=None,
+    )
 
 
 def create_model(
@@ -186,10 +157,7 @@ def create_model(
 
     if embedding_checkpoint is not None:
         embedding_nn, _ = load_embedding_network(
-            config,
-            embedding_checkpoint,
-            freeze=freeze_embedding
-        )
+            config, embedding_checkpoint, freeze=freeze_embedding)
     else:
         print("[Model] Creating new embedding network...")
         embedding_nn = create_embedding_network(config)
@@ -234,25 +202,6 @@ def create_callbacks(config: ml_collections.ConfigDict) -> list:
                 use_default_mplstyle=config.visualization.get('use_default_mplstyle', True),
             )
         )
-
-        target_vis_cfg = config.visualization.get('target', None)
-        if target_vis_cfg is not None:
-            print("[Callbacks] Adding Target Posterior Callback")
-            callbacks.append(
-                TargetPosteriorCallback(
-                    catalog_path=target_vis_cfg.catalog_path,
-                    meta_key=target_vis_cfg.meta_key,
-                    source=target_vis_cfg.source,
-                    loader_kwargs=dict(target_vis_cfg.get('loader_kwargs', {})),
-                    cond_values=dict(target_vis_cfg.get('cond_values', {})),
-                    cond_labels=list(config.get('cond_labels', [])),
-                    n_posterior_samples=target_vis_cfg.get('n_posterior_samples', 2000),
-                    plot_every_n_epochs=target_vis_cfg.get('plot_every_n_epochs', 1),
-                    param_names=list(target_vis_cfg.get('param_names', config.labels)),
-                    meta_path=target_vis_cfg.get('meta_path', None),
-                )
-            )
-
     return callbacks
 
 
