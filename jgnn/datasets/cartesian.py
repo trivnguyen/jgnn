@@ -53,7 +53,11 @@ def prepare_dataloaders(
     for i in loop:
         pos = node_feats['pos'][ptr[i]:ptr[i+1]]
         vel = node_feats['vel'][ptr[i]:ptr[i+1]]
-        vel_error = node_feats['vel_error'][ptr[i]:ptr[i+1]]
+        if node_feats.get('vel_error') is not None:
+            vel_error = node_feats['vel_error'][ptr[i]:ptr[i+1]]
+        else:
+            vel_error = np.zeros_like(vel)
+
         flow_labels = [graph_feats[k][i] for k in labels]
         cond = [graph_feats[k][i] for k in cond_labels] if cond_labels else None
 

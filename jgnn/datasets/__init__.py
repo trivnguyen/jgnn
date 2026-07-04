@@ -77,14 +77,17 @@ def read_graph_dataset(path, features_list=None, concat=False, to_array=True):
 
 
 def read_datasets(
-    root, name, num_datasets=100, init=0, is_directory=True, concat=True
+    root, name, num_datasets=100, init=0, is_directory=True, concat=True, ext='.h5'
 ):
     """Read and concatenate multiple HDF5 dataset files."""
+    if ext[0] != '.':
+        ext = '.' + ext
+
     if is_directory:
         node_feats, graph_feats = {}, {}
 
         for i in tqdm(range(init, init + num_datasets)):
-            data_path = os.path.join(root, name, 'data.{}.hdf5'.format(i))
+            data_path = os.path.join(root, name, f'data.{i}{ext}')
             if not os.path.exists(data_path):
                 print(f'Warning: {data_path} does not exist. Skipping...')
                 continue
@@ -103,7 +106,7 @@ def read_datasets(
         node_feats = {k: np.concatenate(v) for k, v in node_feats.items()}
         graph_feats = {k: np.concatenate(v) for k, v in graph_feats.items()}
     else:
-        data_path = os.path.join(root, name + '.hdf5')
+        data_path = os.path.join(root, name + ext)
         node_feats, graph_feats, _ = read_graph_dataset(
             data_path, concat=concat)
 
