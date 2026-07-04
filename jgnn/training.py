@@ -5,6 +5,7 @@ the wandb/checkpoint/trainer boilerplate that is identical across both.
 """
 
 import os
+import socket
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,20 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     LearningRateMonitor,
 )
+
+
+def _wandb_server_reachable(timeout: float = 3.0) -> bool:
+    """Check whether the WandB API is reachable, with a short timeout.
+
+    Used to pick 'online' vs 'offline' mode up front, so that training
+    doesn't stall behind wandb's own (much longer) connection retries on
+    machines without internet access, e.g. HPC compute nodes.
+    """
+    try:
+        socket.create_connection(("api.wandb.ai", 443), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
 
 
 def setup_workdir(workdir: str) -> Path:
@@ -65,10 +80,23 @@ def create_wandb_logger(
         run_dir: Working directory for the run.
         tag: Tag identifying the training stage, e.g. 'npe' or 'embedding'.
 
+    Config fields
+    -------------
+    wandb_mode : str, optional
+        Force 'online', 'offline', or 'disabled'. If unset, the mode is
+        chosen automatically: 'online' if the WandB API is reachable,
+        otherwise 'offline' (metrics are logged locally and can be
+        uploaded later with `wandb sync`).
+
     Returns:
         Configured WandbLogger instance.
     """
-    wandb_mode = 'disabled' if config.get('debug', False) else 'online'
+    if config.get('debug', False):
+        wandb_mode = 'disabled'
+    else:
+        wandb_mode = config.get('wandb_mode', None)
+        if wandb_mode is None:
+            wandb_mode = 'online' if _wandb_server_reachable() else 'offline'
     print(f"[WandB] Mode: {wandb_mode}")
 
     tags = set(config.get('tags', [])) | {tag}
