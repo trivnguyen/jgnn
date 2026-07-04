@@ -3,7 +3,6 @@
 from . import models
 from . import transforms
 from . import callbacks
-from . import priors
 from . import datasets
 from . import utils
 from . import training
@@ -12,7 +11,6 @@ __all__ = [
     'models',
     'transforms',
     'callbacks',
-    'priors',
     'datasets',
     'utils',
     'training',
