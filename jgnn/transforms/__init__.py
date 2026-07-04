@@ -1,6 +1,7 @@
 
 import torch
 from torch_geometric import transforms as T
+from torch_geometric.loader import DataLoader as PyGDataLoader
 
 from .basic import GetNodeFeatures, Normalize
 from .graph import ALL_GRAPHS, AdaptiveKNNGraph
@@ -27,6 +28,7 @@ __all__ = [
     'LinearSelectionFunction',
     'UncertaintySampler',
     'build_transformation',
+    'compute_norm_dict',
 ]
 
 def build_transformation(
@@ -34,6 +36,7 @@ def build_transformation(
     apply_projection: bool = False,
     apply_selection: bool = False,
     apply_uncertainty: bool = False,
+    recompute_node_features: bool = True,
     graph_name: str = 'KNN',
     graph_args: dict = None,
     projection_args: dict = None,
@@ -52,6 +55,15 @@ def build_transformation(
     `apply_projection` is configured with `use_proper_motions=True`, so that
     the line-of-sight velocity and the two proper-motion components can
     each be assigned a different uncertainty distribution.
+
+    `recompute_node_features` controls whether `GetNodeFeatures` (re)builds
+    `x` from `pos`/`vel`. It is independent of `apply_projection` and
+    `apply_selection` — those two control whether the raw phase-space is
+    projected/subselected, while this controls whether `x` gets rebuilt from
+    the (possibly projected/selected) `pos`/`vel` afterwards. Set it to False
+    for pipelines applied to real observations, where there is no raw 3-D
+    phase-space to project or select from and `x` is already provided on
+    the graph.
     """
 
     transforms = []
@@ -63,10 +75,8 @@ def build_transformation(
     if apply_selection:
         if selection_args is None:
             raise ValueError('`selection_args` must be provided when `apply_selection` is True.')
-        # transforms.append(RadialSelectionFunction(**selection_args))
         transforms.append(RandomSelectionStrategy(**selection_args))
-    if apply_projection or apply_selection:
-        # only recompute node features if projection or selection is applied
+    if recompute_node_features:
         transforms.append(GetNodeFeatures(log=use_log_features))
 
     # Apply uncertainty sampling
@@ -94,3 +104,36 @@ def build_transformation(
 
     transforms = T.Compose(transforms)
     return transforms
+
+
+def compute_norm_dict(graphs, batch_size: int = 256, **pre_transform_kwargs):
+    """Compute `x` normalization stats from the real pre-transform pipeline.
+
+    Runs `graphs` through the same pipeline `build_transformation` would
+    build from `pre_transform_kwargs` (graph construction and `Normalize`
+    are skipped, since only `x` is needed here), then measures the
+    per-feature mean/std of the resulting `x`. This is more accurate than
+    hand-approximating normalization stats from raw `pos`/`vel`, since the
+    pipeline may include projection, selection, and uncertainty transforms
+    that change `x`'s shape and distribution.
+
+    Args:
+        graphs: List of PyG `Data` objects with `pos`/`vel` (and optionally
+            `vel_error`) set, but no `x`.
+        batch_size: Batch size used while streaming `graphs` through the
+            pipeline.
+        **pre_transform_kwargs: Same kwargs as `build_transformation` (e.g.
+            `apply_projection`, `apply_uncertainty`, ...), minus `norm_dict`.
+
+    Returns:
+        Tuple of `(x_loc, x_scale)` tensors.
+    """
+    kwargs = dict(pre_transform_kwargs)
+    kwargs['apply_graph'] = False
+    kwargs['norm_dict'] = None
+    pipeline = build_transformation(**kwargs)
+
+    loader = PyGDataLoader(graphs, batch_size=batch_size, shuffle=False)
+    x_all = torch.cat([pipeline(batch).x for batch in loader], dim=0)
+
+    return x_all.mean(dim=0), x_all.std(dim=0)
