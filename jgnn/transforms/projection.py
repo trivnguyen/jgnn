@@ -25,6 +25,12 @@ class RandomProjection:
     additionally keeps the two velocity components in the sky plane,
     i.e. the proper motion expressed in km/s, alongside the
     line-of-sight velocity.
+
+    Columns are always ordered cyclically starting from the line-of-sight
+    axis: if ``axis`` is the LOS axis, the remaining axes are taken in the
+    order ``(axis + 1) % 3, (axis + 2) % 3`` for both ``pos`` (sky-plane
+    position) and ``vel`` (line-of-sight velocity first, followed by the
+    two proper-motion components, when ``use_proper_motions=True``).
     """
     def __init__(self, axis=None, use_proper_motions=False):
         self.axis = axis
@@ -34,31 +40,34 @@ class RandomProjection:
         batch = batch.clone()
 
         if self.axis is None:
-
             # create the random projection matrix
             R = random_rotation_matrix()
 
             # apply rotation to position and velocity
-            pos_proj = torch.matmul(batch.pos, R)
-            vel_proj = torch.matmul(batch.vel, R)
+            pos = torch.matmul(batch.pos, R)
+            vel = torch.matmul(batch.vel, R)
 
-            # apply the projection by removing the last dimension
-            pos_proj = pos_proj[:, :2]
-            if not self.use_proper_motions:
-                # keep only the line-of-sight velocity component
-                vel_proj = vel_proj[:, 2].unsqueeze(1)
-            # otherwise keep all 3 rotated velocity components: the first
-            # two match pos_proj (proper motion in km/s), the last one is
-            # the line-of-sight velocity
+            # by convention the observer looks along the last rotated axis
+            axis = 2
         else:
-            pos_proj = torch.cat([batch.pos[:, :self.axis], batch.pos[:, self.axis+1:]], dim=1)
-            if self.use_proper_motions:
-                # keep all 3 velocity components: proper motion (the two
-                # axes orthogonal to `axis`) plus the line-of-sight
-                # velocity along `axis`
-                vel_proj = batch.vel
-            else:
-                vel_proj = batch.vel[:, self.axis].unsqueeze(1)
+            pos = batch.pos
+            vel = batch.vel
+            axis = self.axis
+
+        # cyclic ordering of the two axes orthogonal to the LOS axis
+        other1 = (axis + 1) % 3
+        other2 = (axis + 2) % 3
+
+        pos_proj = torch.stack([pos[:, other1], pos[:, other2]], dim=1)
+
+        if self.use_proper_motions:
+            # line-of-sight velocity first, followed by the two
+            # proper-motion components, in cyclic order
+            vel_proj = torch.stack(
+                [vel[:, axis], vel[:, other1], vel[:, other2]], dim=1
+            )
+        else:
+            vel_proj = vel[:, axis].unsqueeze(1)
 
         # update the batch
         batch.pos = pos_proj
