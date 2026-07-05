@@ -1,7 +1,10 @@
 """Training script for Neural Posterior Estimation (NPE)."""
 
+import json
 import os
+import shutil
 import sys
+from pathlib import Path
 
 os.environ['WANDB_DATA_DIR'] = '/scratch/tvnguyen/wandb_data'
 
@@ -20,6 +23,33 @@ from jgnn import datasets, training
 from jgnn.models import NPE, GNNEmbedding
 from jgnn.transforms import build_transformation
 from jgnn.callbacks.visualization import NPEVisualizationCallback
+
+
+def save_config_snapshot(
+    config: ml_collections.ConfigDict, snapshot_dir: Path, config_path: str = None,
+) -> None:
+    """Write a config snapshot into snapshot_dir, next to where the checkpoint lands.
+
+    Downstream consumers that only have the checkpoint file (e.g.
+    tsnpe/register_run.py's local_checkpoint_dir path) can read
+    snapshot_dir/config_snapshot.json to reconstruct model/pre_transforms
+    without needing wandb.
+
+    Args:
+        config: Full training config.
+        snapshot_dir: Directory to write into - the same one
+            ModelCheckpoint writes checkpoints/ under (see main()), not
+            run_dir's root, since a workdir can accumulate multiple runs.
+        config_path: Path to the source config.py file, if known - also
+            copied verbatim (e.g. snapshot_dir/config_snapshot.py).
+    """
+    snapshot_path = snapshot_dir / 'config_snapshot.json'
+    with open(snapshot_path, 'w') as f:
+        json.dump(config.to_dict(), f, indent=2, default=str)
+    print(f"[Setup] Wrote config snapshot -> {snapshot_path}")
+
+    if config_path and os.path.exists(config_path):
+        shutil.copy2(config_path, snapshot_dir / 'config_snapshot.py')
 
 
 def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
@@ -205,21 +235,23 @@ def create_callbacks(config: ml_collections.ConfigDict) -> list:
     return callbacks
 
 
-def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
+def main(config: ml_collections.ConfigDict, config_path: str = None):
     """Train the NPE model with wandb logging.
 
     Args:
         config: Configuration dictionary containing model and training parameters
-        workdir: Working directory for logging and checkpoints
+        config_path: Path to the source config.py file, if known - see
+            save_config_snapshot.
     """
     resume_training = config.get('checkpoint') is not None
+    wandb_logger, project_dir = training.create_wandb_logger(config, tag='npe')
+
     print(f"[Setup] Resume training: {resume_training}")
-    print(f"[Setup] Working directory: {workdir}")
+    print(f"[Setup] Project directory: {project_dir}")
 
-    run_dir = training.setup_workdir(workdir)
-    print(f"[Setup] Run directory: {run_dir}")
-
-    wandb_logger = training.create_wandb_logger(config, run_dir, tag='npe')
+    # snapshot config
+    print(f"[Setup] Saving config snapshot to: {project_dir}")
+    save_config_snapshot(config, project_dir, config_path)
 
     print("[Data] Loading datasets...")
     # norm_dict is None here; if an embedding checkpoint is configured,
@@ -241,7 +273,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
 
     checkpoint_path = None
     if resume_training:
-        checkpoint_path = training.get_checkpoint_path(config, run_dir)
+        checkpoint_path = training.get_checkpoint_path(config, project_dir)
         print(f"[Checkpoint] Resuming from: {checkpoint_path}")
         print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
@@ -249,7 +281,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
     print(f"[Callbacks] Created {len(callbacks)} callbacks")
 
     trainer = training.build_trainer(
-        config, run_dir, callbacks, wandb_logger, num_sanity_val_steps=0)
+        config, project_dir, callbacks, wandb_logger, num_sanity_val_steps=0)
 
     pl.seed_everything(config.seed_training, workers=True)
     print(f"[Seed] Training seed set to: {config.seed_training}")
@@ -273,4 +305,7 @@ if __name__ == "__main__":
         lock_config=True,
     )
     FLAGS(sys.argv)
-    main(config=FLAGS.config, workdir=FLAGS.config.workdir)
+    main(
+        config=FLAGS.config,
+        config_path=config_flags.get_config_filename(FLAGS['config']),
+    )

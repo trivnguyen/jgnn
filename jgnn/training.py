@@ -34,50 +34,13 @@ def _wandb_server_reachable(timeout: float = 3.0) -> bool:
         return False
 
 
-def setup_workdir(workdir: str) -> Path:
-    """Create (if needed) and return the run's working directory.
-
-    Args:
-        workdir: Base working directory.
-
-    Returns:
-        Path object for the working directory.
-    """
-    run_dir = Path(workdir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir
-
-
-def get_checkpoint_path(
-    config: ml_collections.ConfigDict, workdir: Path
-) -> Optional[str]:
-    """Resolve the checkpoint path to resume training from, if any.
-
-    Args:
-        config: Configuration dictionary.
-        workdir: Working directory path.
-
-    Returns:
-        Resolved checkpoint path, or None if `config.checkpoint` is unset.
-    """
-    if config.get('checkpoint') is None:
-        return None
-
-    ckpt = config.checkpoint
-    if os.path.isabs(ckpt):
-        return ckpt
-
-    return str(workdir / 'lightning_logs' / 'checkpoints' / ckpt)
-
-
 def create_wandb_logger(
-    config: ml_collections.ConfigDict, run_dir: Path, tag: str
+    config: ml_collections.ConfigDict, tag: str
 ) -> WandbLogger:
     """Create a WandbLogger for the run, tagged with `tag`.
 
     Args:
         config: Configuration dictionary.
-        run_dir: Working directory for the run.
         tag: Tag identifying the training stage, e.g. 'npe' or 'embedding'.
 
     Config fields
@@ -89,8 +52,12 @@ def create_wandb_logger(
         uploaded later with `wandb sync`).
 
     Returns:
-        Configured WandbLogger instance.
+        Configured WandbLogger instance and project directory path
+        (where checkpoints and config snapshots are saved).
     """
+    workdir = Path(config.workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
     if config.get('debug', False):
         wandb_mode = 'disabled'
     else:
@@ -100,18 +67,49 @@ def create_wandb_logger(
     print(f"[WandB] Mode: {wandb_mode}")
 
     tags = set(config.get('tags', [])) | {tag}
-    return WandbLogger(
+    logger = WandbLogger(
         project=config.get("wandb_project", "jgnn-npe"),
         name=config.get("name"),
         entity=config.get("entity", None),
         id=config.get("id", None),
-        save_dir=str(run_dir),
+        save_dir=str(workdir),
         log_model="all",
         config=config.to_dict(),
         mode=wandb_mode,
         resume="allow",
         tags=list(tags),
     )
+    project_dir = workdir / logger.experiment.project / logger.experiment.id
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    return logger, project_dir
+
+
+def get_checkpoint_path(
+    config: ml_collections.ConfigDict, project_dir: Optional[Path] = None,
+) -> Optional[str]:
+    """Resolve the checkpoint path to resume training from, if any.
+
+    Args:
+        config: Configuration dictionary.
+        project_dir: Project directory path.
+
+    Returns:
+        Resolved checkpoint path, or None if `config.checkpoint` is unset.
+    """
+    if config.get('checkpoint') is None:
+        return None
+
+    ckpt = config.checkpoint
+    if os.path.isabs(ckpt):
+        return ckpt
+
+    if project_dir is None:
+        raise ValueError(
+            "If `config.checkpoint` is a relative path, `project_dir` must be"
+            " provided to resolve the full path."
+        )
+    return str(project_dir / 'checkpoints' / ckpt)
 
 
 def create_base_callbacks(config: ml_collections.ConfigDict) -> list:
@@ -163,7 +161,7 @@ def report_param_counts(model) -> None:
 
 def build_trainer(
     config: ml_collections.ConfigDict,
-    run_dir: Path,
+    project_dir: Path,
     callbacks: list,
     wandb_logger: WandbLogger,
     **trainer_kwargs,
@@ -172,7 +170,7 @@ def build_trainer(
 
     Args:
         config: Configuration dictionary.
-        run_dir: Working directory for the run.
+        project_dir: Project directory for the run.
         callbacks: List of Lightning callbacks.
         wandb_logger: WandB logger instance.
         **trainer_kwargs: Extra keyword arguments forwarded to `pl.Trainer`.
@@ -184,7 +182,7 @@ def build_trainer(
     print(f"[Trainer] Accelerator: {config.accelerator}")
 
     return pl.Trainer(
-        default_root_dir=str(run_dir),
+        default_root_dir=str(project_dir),
         max_epochs=config.num_epochs,
         max_steps=config.num_steps,
         accelerator=config.accelerator,

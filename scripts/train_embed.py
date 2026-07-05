@@ -33,7 +33,7 @@ def prepare_data(config: ml_collections.ConfigDict):
         concat=True,
     )
 
-    train_loader, val_loader, norm_dict = datasets.prepare_dataloaders(
+    train_loader, val_loader, norm_dict = datasets.cartesian.prepare_dataloaders(
         node_feats,
         graph_feats,
         config.labels,
@@ -103,13 +103,10 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
         workdir: Working directory for logging and checkpoints
     """
     resume_training = config.get('checkpoint') is not None
+    wandb_logger, project_dir = training.create_wandb_logger(config, tag='npe')
     print(f"[Setup] Resume training: {resume_training}")
-    print(f"[Setup] Working directory: {workdir}")
+    print(f"[Setup] Project directory: {project_dir}")
 
-    run_dir = training.setup_workdir(workdir)
-    print(f"[Setup] Run directory: {run_dir}")
-
-    wandb_logger = training.create_wandb_logger(config, run_dir, tag='embedding')
 
     print("[Data] Loading datasets...")
     train_loader, val_loader, norm_dict = prepare_data(config)
@@ -127,7 +124,7 @@ def main(config: ml_collections.ConfigDict, workdir: str = "./logging/"):
 
     checkpoint_path = None
     if resume_training:
-        checkpoint_path = training.get_checkpoint_path(config, run_dir)
+        checkpoint_path = training.get_checkpoint_path(config, project_dir)
         print(f"[Checkpoint] Resuming from: {checkpoint_path}")
         print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
