@@ -52,13 +52,14 @@ def save_config_snapshot(
         shutil.copy2(config_path, snapshot_dir / 'config_snapshot.py')
 
 
-def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
+def prepare_data(config: ml_collections.ConfigDict, norm_dict=None):
     """Load and prepare datasets with transformations.
 
     Args:
         config: Configuration dictionary
-        embedding_norm_dict: Optional norm_dict from embedding checkpoint.
-                           If provided, this will be used instead of computing from data.
+        norm_dict: Fixed normalization dict to reuse (e.g. from a resumed
+            checkpoint's own hyper_parameters) instead of computing a fresh
+            one from this call's training data.
 
     Returns:
         Tuple of (train_loader, val_loader, norm_dict)
@@ -79,12 +80,6 @@ def prepare_data(config: ml_collections.ConfigDict, embedding_norm_dict=None):
         is_directory=True,
         concat=True
     )
-
-    if embedding_norm_dict is not None and config.get('reuse_embedding_norm_dict', True):
-        print("[Data] Reusing normalization dict from embedding checkpoint")
-        norm_dict = embedding_norm_dict
-    else:
-        norm_dict = None
 
     train_loader, val_loader, norm_dict = datasets.cartesian.prepare_dataloaders(
         node_feats,
@@ -113,21 +108,11 @@ def load_embedding_network(
         freeze: If True, freeze all parameters of the embedding network
 
     Returns:
-        Tuple of (embedding_network, norm_dict)
-        - embedding_network: The loaded GNNEmbedding model
-        - norm_dict: The normalization dictionary from the checkpoint (if available)
+        The loaded GNNEmbedding model.
     """
     print(f"[Embedding] Loading pre-trained embedding network from: {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
     embedding_nn = GNNEmbedding.load_from_checkpoint(checkpoint_path)
-    norm_dict = None
-
-    if 'hyper_parameters' in checkpoint:
-        hparams = checkpoint['hyper_parameters']
-        if 'norm_dict' in hparams:
-            norm_dict = hparams['norm_dict']
-            print(f"[Embedding] Loaded norm_dict from embedding checkpoint")
 
     if freeze:
         for param in embedding_nn.parameters():
@@ -138,7 +123,7 @@ def load_embedding_network(
     print(f"[Embedding] Embedding network loaded successfully")
     print(f"[Embedding] Output size: {embedding_nn.output_size}")
 
-    return embedding_nn, norm_dict
+    return embedding_nn
 
 
 def create_embedding_network(config: ml_collections.ConfigDict):
@@ -186,7 +171,7 @@ def create_model(
     freeze_embedding = config.model.embedding.get('freeze', False)
 
     if embedding_checkpoint is not None:
-        embedding_nn, _ = load_embedding_network(
+        embedding_nn = load_embedding_network(
             config, embedding_checkpoint, freeze=freeze_embedding)
     else:
         print("[Model] Creating new embedding network...")
@@ -253,10 +238,21 @@ def main(config: ml_collections.ConfigDict, config_path: str = None):
     print(f"[Setup] Saving config snapshot to: {project_dir}")
     save_config_snapshot(config, project_dir, config_path)
 
+    checkpoint_path = None
+    norm_dict = None
+    if resume_training:
+        checkpoint_path = training.get_checkpoint_path(config, project_dir)
+        print(f"[Checkpoint] Resuming from: {checkpoint_path}")
+        print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
+
+        # Make sure that the norm_dict is reused from the resumed checkpoint's hyper_parameters
+        resume_checkpoint = torch.load(
+            checkpoint_path, map_location='cpu', weights_only=False)
+        norm_dict = resume_checkpoint['hyper_parameters']['norm_dict']
+        print("[Checkpoint] Reusing norm_dict from resumed checkpoint")
+
     print("[Data] Loading datasets...")
-    # norm_dict is None here; if an embedding checkpoint is configured,
-    # create_model() below loads it and returns its norm_dict for reuse.
-    train_loader, val_loader, norm_dict = prepare_data(config)
+    train_loader, val_loader, norm_dict = prepare_data(config, norm_dict=norm_dict)
     print(f"[Data] Train batches: {len(train_loader)}, Val batches: {len(val_loader)}")
 
     print("[Transforms] Building pre-transforms...")
@@ -270,12 +266,6 @@ def main(config: ml_collections.ConfigDict, config_path: str = None):
 
     # this watches all parameters and gradients
     wandb_logger.watch(model, log="all", log_freq=1000, log_graph=False)
-
-    checkpoint_path = None
-    if resume_training:
-        checkpoint_path = training.get_checkpoint_path(config, project_dir)
-        print(f"[Checkpoint] Resuming from: {checkpoint_path}")
-        print(f"[Checkpoint] Reset optimizer: {config.get('reset_optimizer', False)}")
 
     callbacks = create_callbacks(config)
     print(f"[Callbacks] Created {len(callbacks)} callbacks")
