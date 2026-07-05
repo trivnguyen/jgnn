@@ -183,6 +183,7 @@ def prepare_dataloaders(
             raise ValueError(
                 'pre_transform_kwargs must be provided to compute norm_dict '
                 '(needed to run the real pre_transform pipeline).')
+        print('Computing norm_dict from training graphs...')
         norm_dict = _compute_norm(
             train_graphs, pre_transform_kwargs, cond_labels)
 

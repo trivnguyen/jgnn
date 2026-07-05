@@ -127,6 +127,13 @@ def create_base_callbacks(config: ml_collections.ConfigDict) -> list:
             mode='min',
             patience=config.patience,
             verbose=True,
+            # False: check right after validation logs val/loss (on
+            # on_validation_end), not right after the training epoch ends.
+            # With the default (True), resuming from a full checkpoint can
+            # hit an epoch-end boundary before this session's validation
+            # loop has run yet, and the check crashes with "metric not
+            # available" even though nothing is actually wrong.
+            check_on_train_epoch_end=False,
         ),
         ModelCheckpoint(
             filename="epoch={epoch}-step={step}-loss={val/loss:.4f}",
@@ -215,12 +222,20 @@ def fit(
     """
     if checkpoint_path and reset_optimizer:
         print("[Training] Loading model weights with fresh optimizer state")
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        checkpoint = torch.load(
+            checkpoint_path, map_location='cpu', weights_only=False
+        )
         model.load_state_dict(checkpoint['state_dict'])
         trainer.fit(model, train_loader, val_loader)
     elif checkpoint_path:
         print("[Training] Resuming training from full checkpoint")
-        trainer.fit(model, train_loader, val_loader, ckpt_path=checkpoint_path)
+        trainer.fit(
+            model,
+            train_loader,
+            val_loader,
+            ckpt_path=checkpoint_path,
+            weights_only=False,
+        )
     else:
         print("[Training] Starting fresh training")
         trainer.fit(model, train_loader, val_loader)
