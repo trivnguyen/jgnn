@@ -82,6 +82,8 @@ def create_wandb_logger(
     project_dir = workdir / logger.experiment.project / logger.experiment.id
     project_dir.mkdir(parents=True, exist_ok=True)
 
+    print(logger, project_dir)
+
     return logger, project_dir
 
 
@@ -148,6 +150,12 @@ def create_base_callbacks(config: ml_collections.ConfigDict) -> list:
             save_weights_only=False,
             save_last=True,
             auto_insert_metric_name=False,
+            # False: without this, a fresh process (e.g. a SLURM
+            # resubmission) versions instead of overwriting last.ckpt,
+            # freezing it at the first session's state - breaking
+            # config.checkpoint='last.ckpt' and tsnpe's crash-recovery
+            # check (train_round.py) across resumes.
+            enable_version_counter=False,
         ),
         LearningRateMonitor(logging_interval="step"),
     ]
