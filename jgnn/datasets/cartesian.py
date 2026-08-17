@@ -95,7 +95,7 @@ def _build_graphs(node_feats, graph_feats, labels, cond_labels=None,
     return graphs
 
 
-def _compute_norm(graphs, pre_transform_kwargs, cond_labels=None):
+def _compute_norm(graphs, pre_transform_kwargs, cond_labels=None, num_max_graphs=None):
     """Compute normalization stats from a list of graphs.
 
     `x_loc`/`x_scale` come from actually running `graphs` through the
@@ -103,7 +103,8 @@ def _compute_norm(graphs, pre_transform_kwargs, cond_labels=None):
     `jgnn.transforms.compute_norm_dict`), rather than approximating them
     from raw `pos`/`vel`.
     """
-    x_loc, x_scale = compute_norm_dict(graphs, **pre_transform_kwargs)
+    x_loc, x_scale = compute_norm_dict(
+        graphs, num_max_graphs=num_max_graphs, **pre_transform_kwargs)
 
     theta_all = torch.cat([g.theta for g in graphs], dim=0)
     theta_min = theta_all.min(dim=0)[0]
@@ -124,6 +125,11 @@ def _compute_norm(graphs, pre_transform_kwargs, cond_labels=None):
         cond_max = cond_all.max(dim=0)[0]
         norm['cond_loc'] = ((cond_max + cond_min) / 2).tolist()
         norm['cond_scale'] = ((cond_max - cond_min) / 2).tolist()
+
+    # print norm dict
+    print('Normalization dictionary:')
+    for k, v in norm.items():
+        print(f'  {k}: {v}')
 
     return norm
 
@@ -157,7 +163,7 @@ def _apply_norm(graphs, norm_dict, device, cond_labels=None):
 def prepare_dataloaders(
     node_feats, graph_feats, labels, train_frac=0.8, train_batch_size=32,
     eval_batch_size=32, num_workers=1, norm_dict=None, seed=0,
-    cond_labels=None, pre_transform_kwargs=None
+    cond_labels=None, pre_transform_kwargs=None, max_norm_graphs=None
 ):
     """Prepare train/val dataloaders from Cartesian phase-space node features.
 
@@ -185,7 +191,8 @@ def prepare_dataloaders(
                 '(needed to run the real pre_transform pipeline).')
         print('Computing norm_dict from training graphs...')
         norm_dict = _compute_norm(
-            train_graphs, pre_transform_kwargs, cond_labels)
+            train_graphs, pre_transform_kwargs, cond_labels,
+            num_max_graphs=max_norm_graphs)
 
     _apply_norm(train_graphs, norm_dict, device, cond_labels)
     _apply_norm(val_graphs, norm_dict, device, cond_labels)
@@ -203,7 +210,7 @@ def prepare_dataloaders(
 def prepare_test_dataloader(
     node_feats, graph_feats, labels, batch_size=32, num_workers=1,
     norm_dict=None, seed=0, max_graphs=None, cond_labels=None,
-    pre_transform_kwargs=None
+    pre_transform_kwargs=None, max_norm_graphs=None
 ):
     """Prepare a test dataloader from Cartesian phase-space node features."""
     pl.seed_everything(seed)
@@ -218,7 +225,8 @@ def prepare_test_dataloader(
             raise ValueError(
                 'pre_transform_kwargs must be provided to compute norm_dict '
                 '(needed to run the real pre_transform pipeline).')
-        norm_dict = _compute_norm(graphs, pre_transform_kwargs, cond_labels)
+        norm_dict = _compute_norm(
+            graphs, pre_transform_kwargs, cond_labels, num_max_graphs=max_norm_graphs)
 
     _apply_norm(graphs, norm_dict, device, cond_labels)
 

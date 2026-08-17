@@ -71,7 +71,7 @@ def build_transformation(
 
     # Normalizing node features
     if norm_dict is not None:
-        print(f"Applying normalization with provided norm_dict: {norm_dict}")
+        # print(f"Applying normalization with provided norm_dict: {norm_dict}")
         transforms.append(Normalize(norm_dict['x_loc'], norm_dict['x_scale']))
 
     # Apply graph transformation, connect edges based on the specified graph type
@@ -85,7 +85,8 @@ def build_transformation(
     return transforms
 
 
-def compute_norm_dict(graphs, batch_size: int = 256, **pre_transform_kwargs):
+def compute_norm_dict(
+    graphs, batch_size: int = 256, num_max_graphs=None, **pre_transform_kwargs):
     """Compute `x` normalization stats from the real pre-transform pipeline.
 
     Runs `graphs` through the same pipeline `build_transformation` would
@@ -113,6 +114,15 @@ def compute_norm_dict(graphs, batch_size: int = 256, **pre_transform_kwargs):
     pipeline = build_transformation(**kwargs)
 
     loader = PyGDataLoader(graphs, batch_size=batch_size, shuffle=False)
-    x_all = torch.cat([pipeline(batch).x for batch in loader], dim=0)
+    num_graphs_tot = 0
+    transformed_graphs = []
+
+    for batch in loader:
+        num_graphs_tot += batch.num_graphs
+        if num_max_graphs is not None and num_graphs_tot >= num_max_graphs:
+            break
+        transformed_graphs.append(pipeline(batch))
+
+    x_all = torch.cat([g.x for g in transformed_graphs], dim=0)
 
     return x_all.mean(dim=0), x_all.std(dim=0)
