@@ -11,6 +11,7 @@ from .selection_function import (
     LinearSelectionFunction,
 )
 from .uncertainty import UncertaintySampler
+from .summary import BinnedMoments
 from .pipeline import build_transformation, compute_norm_dict
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     'ExponentialSelectionFunction',
     'LinearSelectionFunction',
     'UncertaintySampler',
+    'BinnedMoments',
     'build_transformation',
     'compute_norm_dict',
 ]

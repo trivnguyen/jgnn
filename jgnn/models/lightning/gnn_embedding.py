@@ -105,9 +105,14 @@ class GNNEmbedding(pl.LightningModule):
 
         self.loss_fn, self.flow = build_embedding_loss(self.loss_type, loss_config)
 
-    def forward(self, batch_dict):
-        """Forward pass through GNN -> MLP [+ CondMLP]."""
-        # GNN featurizer
+    def embed_data(self, batch_dict):
+        """The data half of the embedding: GNN -> MLP, no conditional term.
+
+        Inference code that marginalises over the conditional variables
+        (tsnpe.proposal) computes this once per observation and adds
+        `conditional_mlp(cond)` per draw; subclasses override it so that
+        path stays valid for every embedding type.
+        """
         embedding = self.gnn(
             batch_dict['x'],
             batch_dict['edge_index'],
@@ -115,9 +120,11 @@ class GNNEmbedding(pl.LightningModule):
             edge_attr=batch_dict['edge_attr'],
             edge_weight=batch_dict['edge_weight'],
         )
+        return self.mlp(embedding)
 
-        # MLP projection
-        embedding = self.mlp(embedding)
+    def forward(self, batch_dict):
+        """Forward pass through GNN -> MLP [+ CondMLP]."""
+        embedding = self.embed_data(batch_dict)
 
         # Add conditional features if provided
         if self.conditional_mlp is not None:

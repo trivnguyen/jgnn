@@ -7,7 +7,13 @@ from .basic import GetNodeFeatures, Normalize
 from .graph import ALL_GRAPHS
 from .projection import RandomProjection
 from .selection_function import RandomSelectionStrategy
+from .summary import BinnedMoments, OracleGaussianLogLike
 from .uncertainty import UncertaintySampler
+
+
+# Graph-level summary transforms selectable with `summary_name`.
+SUMMARIES = {'binned_moments': BinnedMoments,
+             'oracle_gaussian': OracleGaussianLogLike}
 
 
 def build_transformation(
@@ -22,7 +28,10 @@ def build_transformation(
     selection_args: dict = None,
     uncertainty_args = None,
     norm_dict = None,
-    use_log_features: bool = True
+    use_log_features: bool = True,
+    apply_summary: bool = False,
+    summary_args: dict = None,
+    summary_name: str = 'binned_moments',
 ):
     """
     Build a transformation pipeline for graph data.
@@ -68,6 +77,14 @@ def build_transformation(
             uncertainty_args = [uncertainty_args]
         for args in uncertainty_args:
             transforms.append(UncertaintySampler(**args))
+
+    # Graph-level binned-moment summaries, from the noisy, subselected x
+    # (so after uncertainty, before normalization). Off by default.
+    if apply_summary:
+        if summary_name not in SUMMARIES:
+            raise ValueError(f'Unknown summary name: {summary_name}. '
+                             f'Supported: {list(SUMMARIES)}')
+        transforms.append(SUMMARIES[summary_name](**(summary_args or {})))
 
     # Normalizing node features
     if norm_dict is not None:

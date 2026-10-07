@@ -20,6 +20,11 @@ class MLP(nn.Module):
         Whether to use batch normalization
     dropout : float
         Dropout probability
+    final_act : bool
+        Whether to apply `act` after the output layer too. True (the
+        historical behaviour, kept so existing checkpoints load unchanged)
+        clips the output to the activation's range, e.g. non-negative for
+        ReLU. Set False for a linear output layer.
     """
     def __init__(
         self,
@@ -28,7 +33,8 @@ class MLP(nn.Module):
         hidden_sizes: List[int] = [512],
         act: Callable = nn.ReLU(),
         batch_norm: bool = False,
-        dropout: float = 0.0
+        dropout: float = 0.0,
+        final_act: bool = True,
     ):
         super().__init__()
         self.input_size = input_size
@@ -37,6 +43,7 @@ class MLP(nn.Module):
         self.act = act
         self.batch_norm = batch_norm
         self.dropout = dropout
+        self.final_act = final_act
 
         # Create a list of all layer sizes: input, hidden, and output
         layer_sizes = [input_size] + hidden_sizes + [output_size]
@@ -47,7 +54,8 @@ class MLP(nn.Module):
             in_dim = layer_sizes[i]
             out_dim = layer_sizes[i + 1]
             layers.append(nn.Linear(in_dim, out_dim))
-            layers.append(act)
+            if final_act or i < len(layer_sizes) - 2:
+                layers.append(act)
             if batch_norm:
                 layers.append(nn.BatchNorm1d(out_dim))
             if dropout > 0:
