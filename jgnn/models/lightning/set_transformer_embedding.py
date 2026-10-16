@@ -29,7 +29,12 @@ class SetTransformerEmbedding(GNNEmbedding):
     set_transformer_args : dict
         `d_model`, `n_layers`, `n_heads`, `n_seeds` and optional `d_mlp`
         (feed-forward width inside each attention block, default
-        2 * d_model).
+        2 * d_model). Optional `pos_mode`: 'append' adds the two
+        sky-plane positions to the per-star features, 'replace' uses
+        them instead of the log R column; None (default) keeps the
+        features as they are. Positions are divided by the galaxy's
+        half-light radius, read back from the normalised `cond`
+        (log10 r_half) with the dataset's `cond_norm` = (loc, scale).
     **kwargs
         Passed to `GNNEmbedding`; `gnn_args` is accepted and ignored so
         configs and loaders keep one shape.
@@ -43,7 +48,12 @@ class SetTransformerEmbedding(GNNEmbedding):
     def _setup_model(self):
         a = self.set_args
         d, d_mlp = a['d_model'], a.get('d_mlp', 2 * a['d_model'])
-        self.embed = nn.Linear(self.input_size, d)
+        self.pos_mode = a.get('pos_mode', None)
+        self.cond_norm = (tuple(a['cond_norm']) if self.pos_mode is not None
+                          else None)
+        in_dim = self.input_size + {None: 0, 'append': 2,
+                                    'replace': 1}[self.pos_mode]
+        self.embed = nn.Linear(in_dim, d)
         self.sabs = nn.ModuleList([
             MultiHeadAttentionBlock(d, d, d_mlp, a['n_heads'])
             for _ in range(a['n_layers'])])
@@ -98,9 +108,17 @@ class SetTransformerEmbedding(GNNEmbedding):
         if graph is None:
             graph = torch.zeros(batch.x.shape[0], dtype=torch.long,
                                 device=batch.x.device)
-        x_dense, valid = to_dense_batch(batch.x, graph)
+        x = batch.x
+        if self.pos_mode is not None:
+            loc, scale = self.cond_norm
+            r_half = 10.0 ** (batch.cond[:, 0] * scale + loc)
+            pos = batch.pos[:, :2] / r_half[graph].unsqueeze(1)
+            # Reason: column 0 of x is log R; 'replace' swaps it for (x, y).
+            x = (torch.cat([x, pos], 1) if self.pos_mode == 'append'
+                 else torch.cat([pos, x[:, 1:]], 1))
+        x_dense, valid = to_dense_batch(x, graph)
         return {
-            'x': batch.x, 'x_dense': x_dense, 'valid': valid,
+            'x': x, 'x_dense': x_dense, 'valid': valid,
             'edge_index': None, 'batch': graph, 'target': batch.get('theta'),
             'edge_attr': None, 'edge_weight': None, 'cond': batch.get('cond'),
             'batch_size': x_dense.size(0),
