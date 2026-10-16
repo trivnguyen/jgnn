@@ -3,6 +3,7 @@ import torch
 from abc import ABC, abstractmethod
 from torch_geometric.data import Data, Batch
 
+_NODE_ATTRS = ('x', 'pos', 'vel', 'vel_error')
 
 class BaseSelectionFunction(ABC):
     """Base class for selection functions that filter nodes based on radial distance."""
@@ -43,7 +44,12 @@ class BaseSelectionFunction(ABC):
 
 
 def apply_mask(batch, mask, min_nodes=1):
-    """Apply a boolean mask to all relevant attributes of the batch.
+    """Apply a boolean mask to the node-level attributes of the batch.
+
+    Only masks whichever of `x`, `pos`, `vel`, `vel_error` are actually
+    present on the batch — e.g. `x` doesn't exist yet if selection runs
+    before `GetNodeFeatures` in the pre_transform pipeline. Graph-level
+    attributes (`theta`, `cond`) are carried over unchanged.
 
     Args:
         batch: PyG Batch object
@@ -66,14 +72,15 @@ def apply_mask(batch, mask, min_nodes=1):
             graph_mask[keep_indices] = True
 
         graph_data = batch[i]
-        graph_data = Data(
-            x=graph_data.x[graph_mask],
-            pos=graph_data.pos[graph_mask],
-            vel=graph_data.vel[graph_mask],
-            theta=graph_data.theta,
-            cond=graph_data.get('cond', None)
-        )
-        data_list.append(graph_data)
+        kwargs = {
+            attr: getattr(graph_data, attr)[graph_mask]
+            for attr in _NODE_ATTRS
+            if graph_data.get(attr) is not None
+        }
+        kwargs['theta'] = graph_data.theta
+        kwargs['cond'] = graph_data.get('cond', None)
+
+        data_list.append(Data(**kwargs))
     batch = Batch.from_data_list(data_list)
     return batch
 

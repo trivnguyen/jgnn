@@ -1,16 +1,19 @@
 """PyTorch Lightning modules for Jeans GNN."""
 
 from .gnn_embedding import GNNEmbedding
+from .gnn_summary_embedding import GNNSummaryEmbedding
+from .summary_embedding import SummaryEmbedding
+from .set_transformer_embedding import SetTransformerEmbedding
+from .deepsets_embedding import DeepSetsEmbedding
 from .transformer_embedding import TransformerEmbedding
 from .npe import NPE
-from .nre import NRE
-from .snpe import SequentialNPE, DirectPosterior
 
 __all__ = [
     'GNNEmbedding',
+    'GNNSummaryEmbedding',
+    'SummaryEmbedding',
+    'SetTransformerEmbedding',
+    'DeepSetsEmbedding',
     'TransformerEmbedding',
     'NPE',
-    'NRE',
-    'SequentialNPE',
-    'DirectPosterior',
 ]

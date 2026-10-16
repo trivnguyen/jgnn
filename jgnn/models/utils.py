@@ -121,6 +121,28 @@ class WarmUpCosineAnnealingLR(torch.optim.lr_scheduler.LambdaLR):
         progress = (step_in_cycle - self.warmup_steps) / (cycle_length - self.warmup_steps)
         return self.eta_min + 0.5 * (1 + math.cos(math.pi * progress))
 
+    # Schedule shape, as opposed to position along it.
+    _SCHEDULE_KEYS = (
+        'T_0', 'decay_steps', 'warmup_steps', 'eta_min', 'restart', 'T_mult')
+
+    def load_state_dict(self, state_dict):
+        """Restore position in the schedule, but keep the schedule itself.
+
+        LambdaLR.load_state_dict does `self.__dict__.update(state_dict)`,
+        and since lr_lambda reads self.restart / self.decay_steps off the
+        instance, the checkpoint's values would silently replace the ones
+        this run was constructed with. That makes changing the schedule on
+        resume a no-op: setting restart=True on a run whose checkpoint has
+        restart=False leaves lr pinned at eta_min for every further epoch.
+
+        Only last_epoch / _step_count / base_lrs come from the checkpoint;
+        the schedule comes from the config. Resumes that don't change the
+        schedule are unaffected, the values being identical either way.
+        """
+        schedule = {k: getattr(self, k) for k in self._SCHEDULE_KEYS}
+        super().load_state_dict(state_dict)
+        self.__dict__.update(schedule)
+
 
 def configure_optimizers(parameters, optimizer_args, scheduler_args=None):
     """Configure optimizer and scheduler for PyTorch Lightning.

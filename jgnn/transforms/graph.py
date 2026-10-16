@@ -1,7 +1,35 @@
 
 import torch
 from torch_geometric import transforms as T
-from torch_cluster import knn_graph
+try:
+    from torch_cluster import knn_graph as _knn_graph_cluster
+except ImportError:  # Reason: torch_cluster has no wheels for macOS arm64
+    _knn_graph_cluster = None
+
+
+def _knn_graph_torch(pos, k, loop=False):
+    """Pure-torch k-NN edges, same layout as torch_cluster.knn_graph
+    (flow source_to_target: row 0 = neighbour, row 1 = query node).
+    Used when torch_cluster is absent or `pos` lives on a device it has
+    no kernel for (MPS). O(N^2) memory per graph: fine for <= few 1e3
+    stars."""
+    n = pos.shape[0]
+    k = min(k, n if loop else n - 1)
+    if k <= 0:
+        return torch.empty(2, 0, dtype=torch.long, device=pos.device)
+    d = torch.cdist(pos, pos)
+    if not loop:
+        d.fill_diagonal_(float('inf'))
+    nbr = d.topk(k, dim=1, largest=False).indices  # (n, k)
+    row = torch.arange(n, device=pos.device).repeat_interleave(k)
+    return torch.stack([nbr.reshape(-1), row])
+
+
+def knn_graph(pos, k, loop=False):
+    if _knn_graph_cluster is None or pos.device.type == 'mps':
+        return _knn_graph_torch(pos, k, loop)
+    return _knn_graph_cluster(pos, k=k, loop=loop)
+
 
 class AdaptiveKNNGraph:
     """
@@ -27,8 +55,8 @@ class AdaptiveKNNGraph:
             # Single graph: use simple approach
             num_nodes = data.num_nodes
             k = max(1, int(self.ratio * num_nodes))
-            transform = T.KNNGraph(k=k, loop=self.loop)
-            return transform(data)
+            data.edge_index = knn_graph(data.pos, k=k, loop=self.loop)
+            return data
 
         # Batch: process each graph with its own k value
         edge_indices = []

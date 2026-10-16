@@ -205,7 +205,8 @@ class NPE(pl.LightningModule):
             self.parameters(), self.optimizer_args, self.scheduler_args)
 
     @torch.no_grad()
-    def sample_from_batch(self, batch, num_samples, pre_transforms=None, return_embedding=False):
+    def sample_from_batch(self, batch, num_samples, pre_transforms=None, return_embedding=False,
+                          return_log_prob=False):
         """Sample from the posterior distribution for a given batch.
 
         Args:
@@ -214,9 +215,11 @@ class NPE(pl.LightningModule):
             pre_transforms: Optional data transformations to apply. If given,
                             these will override the model's pre_transforms.
             return_embedding: If True, also return the embedding along with the posterior samples.
+            return_log_prob: If True, also return the log probability of each sample.
         Returns:
             torch.Tensor: Posterior samples of shape (batch_size, num_samples, output_size)
             (optional) torch.Tensor: Embedding of shape (batch_size, embedding_output_size)
+            (optional) torch.Tensor: Log probabilities of shape (batch_size, num_samples)
         """
         self.eval()
 
@@ -228,16 +231,26 @@ class NPE(pl.LightningModule):
 
         batch = batch.to(self.device)
         embedding = self.forward(batch)
-        posterior = self.flows(embedding).sample((num_samples, ))  # (num_samples, batch_size, output_size)
-        posterior = posterior.transpose(0, 1) # (batch_size, num_samples, output_size)
+        dist = self.flows(embedding)
+        posterior = dist.sample((num_samples, ))  # (num_samples, batch_size, output_size)
+
+        results = [posterior.transpose(0, 1)]  # (batch_size, num_samples, output_size)
 
         if return_embedding:
-            return posterior, embedding
-        return posterior
+            results.append(embedding)
+
+        if return_log_prob:
+            log_prob = dist.log_prob(posterior)  # (num_samples, batch_size)
+            results.append(log_prob.transpose(0, 1))  # (batch_size, num_samples)
+
+        if len(results) == 1:
+            return results[0]
+        return tuple(results)
 
     @torch.no_grad()
     def sample_from_loader(
-        self, loader, num_samples, pre_transforms=None, verbose=True, return_embedding=False):
+        self, loader, num_samples, pre_transforms=None, verbose=True, return_embedding=False,
+        return_log_prob=False):
         """Sample from the posterior distribution for all data in a DataLoader.
 
         Args:
@@ -246,20 +259,83 @@ class NPE(pl.LightningModule):
             pre_transforms: Optional data transformations to apply. If given,
                             these will override the model's pre_transforms.
             verbose: Whether to display a progress bar
+            return_log_prob: If True, also return the log probability of each sample.
         Returns:
             torch.Tensor: Posterior samples of shape (num_data, num_samples, output_size)
+            (optional) torch.Tensor: Embeddings of shape (num_data, embedding_output_size)
+            (optional) torch.Tensor: Log probabilities of shape (num_data, num_samples)
         """
         self.eval()
         posteriors = []
         embeddings = []
+        log_probs = []
         for batch in tqdm(loader, disable=not verbose):
-            posterior, embedding = self.sample_from_batch(
-                batch, num_samples, pre_transforms=pre_transforms, return_embedding=True)
+            result = self.sample_from_batch(
+                batch, num_samples, pre_transforms=pre_transforms,
+                return_embedding=True, return_log_prob=return_log_prob)
+            if return_log_prob:
+                posterior, embedding, log_prob = result
+                log_probs.append(log_prob.cpu())
+            else:
+                posterior, embedding = result
             posteriors.append(posterior.cpu())
             embeddings.append(embedding.cpu())
 
         posteriors = torch.cat(posteriors, dim=0)
+        out = [posteriors]
         if return_embedding:
             embeddings = torch.cat(embeddings, dim=0)
-            return posteriors, embeddings
-        return posteriors
+            out.append(embeddings)
+        if return_log_prob:
+            log_probs = torch.cat(log_probs, dim=0)
+            out.append(log_probs)
+        if len(out) == 1:
+            return out[0]
+        return tuple(out)
+
+    @torch.no_grad()
+    def logprob_from_batch(self, batch, pre_transforms=None):
+        """Evaluate the log probability of the posterior distribution for a given batch.
+
+        Args:
+            batch: Input batch data
+            pre_transforms: Optional data transformations to apply. If given,
+                            these will override the model's pre_transforms.
+        Returns:
+            torch.Tensor: Log probabilities of shape (batch_size, num_samples)
+        """
+        self.eval()
+
+        # Apply pre-transforms if provided, else fall back to model's pre_transforms
+        if pre_transforms is not None:
+            batch = pre_transforms(batch)
+        elif self.pre_transforms is not None:
+            batch = self.pre_transforms(batch)
+
+        batch = batch.to(self.device)
+        embedding = self.forward(batch)
+        dist = self.flows(embedding)
+        log_prob = dist.log_prob(batch.theta)  # (batch_size,)
+
+        return log_prob
+
+    @torch.no_grad()
+    def logprob_from_loader(self, loader, pre_transforms=None, verbose=True):
+        """Evaluate the log probability of the posterior distribution for all data in a DataLoader.
+
+        Args:
+            loader: DataLoader containing the input data
+            pre_transforms: Optional data transformations to apply. If given,
+                            these will override the model's pre_transforms.
+            verbose: Whether to display a progress bar
+        Returns:
+            torch.Tensor: Log probabilities of shape (num_data,)
+        """
+        self.eval()
+        log_probs = []
+        for batch in tqdm(loader, disable=not verbose):
+            log_prob = self.logprob_from_batch(batch, pre_transforms=pre_transforms)
+            log_probs.append(log_prob.cpu())
+
+        log_probs = torch.cat(log_probs, dim=0)
+        return log_probs
