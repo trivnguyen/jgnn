@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch_geometric.nn as gnn
 import torch_geometric.transforms as T
 
+from .cheb_fast import ChebConvFast
+
 
 class GNNBlock(nn.Module):
     def __init__(
@@ -37,6 +39,10 @@ class GNNBlock(nn.Module):
         # Registry: layer_name -> (has_edge_attr, has_edge_weight, factory)
         registry = {
             "ChebConv": (False, True, lambda: gnn.ChebConv(
+                self.input_size, self.output_size, **self.layer_params)),
+            # Reason: same layer as ChebConv from plain index_select /
+            # index_add_ (fast on Apple MPS); see layers/cheb_fast.py.
+            "ChebConvFast": (False, True, lambda: ChebConvFast(
                 self.input_size, self.output_size, **self.layer_params)),
             "GCNConv": (False, True, lambda: gnn.GCNConv(
                 self.input_size, self.output_size, **self.layer_params)),
